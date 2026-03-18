@@ -2,9 +2,8 @@ import sys
 import traceback
 import logging
 import subprocess
-import importlib.metadata
 import locale
-import asyncio
+from pathlib import Path
 from .nodes.constants import LOG_TRANSLATIONS
 
 _original_print_exception = traceback.print_exception
@@ -89,12 +88,6 @@ if sys.platform == 'win32':
 
 from comfy_api.latest import ComfyExtension
 
-from .nodes.nodes_shared import JimengAPIClient
-from .nodes.nodes_image import JimengSeedream3, JimengSeedream4, JimengSeedream5
-from .nodes.nodes_video import JimengSeedance1, JimengSeedance1_5, JimengReferenceImage2Video, JimengVideoQueryTasks, JimengProgressTest
-from .nodes.nodes_visual import JimengVisualUnderstanding
-from .nodes.quota import JimengQuotaSettings
-
 def get_init_text(key, **kwargs):
     """
     获取初始化过程中的本地化文本。
@@ -119,65 +112,69 @@ def get_init_text(key, **kwargs):
 
 def check_and_update_dependencies():
     """
-    检查并自动更新依赖项 (volcengine-python-sdk)。
-    如果未安装或版本过低，将尝试自动安装/更新。
+    检查并自动安装依赖项。
+    仅在运行时模块缺失时触发安装，安装源统一使用 requirements.txt。
     """
-    package_name = "volcengine-python-sdk"
-    install_spec = "volcengine-python-sdk[ark]>=5.0.12"
-    min_version = "5.0.12"
+    package_name = "volcengine-python-sdk[ark]"
+    requirements_file = Path(__file__).with_name("requirements.txt")
 
     try:
-        current_version = importlib.metadata.version(package_name)
-
-        try:
-            from packaging import version
-
-            if version.parse(current_version) < version.parse(min_version):
-                print(
-                    get_init_text(
-                        "init_sdk_ver_low", current=current_version, min=min_version
-                    )
-                )
-
-                subprocess.check_call(
-                    [sys.executable, "-m", "pip", "install", install_spec]
-                )
-                print(get_init_text("init_sdk_update_ok"))
-        except ImportError:
-            pass
-
-    except importlib.metadata.PackageNotFoundError:
+        import volcenginesdkarkruntime
+        return True
+    except ModuleNotFoundError:
         print(get_init_text("init_sdk_not_found", pkg=package_name))
         try:
             subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", install_spec]
+                [
+                    sys.executable,
+                    "-m",
+                    "pip",
+                    "install",
+                    "--disable-pip-version-check",
+                    "-r",
+                    str(requirements_file),
+                ]
             )
+            import volcenginesdkarkruntime
             print(get_init_text("init_sdk_install_ok"))
+            return True
         except Exception as e:
             print(get_init_text("init_sdk_install_fail", e=e))
+            return False
     except Exception as e:
         print(get_init_text("init_dep_check_err", e=e))
+        return False
 
-check_and_update_dependencies()
+_dependencies_ready = check_and_update_dependencies()
+
+if _dependencies_ready:
+    from .nodes.nodes_shared import JimengAPIClient
+    from .nodes.nodes_image import JimengSeedream3, JimengSeedream4, JimengSeedream5
+    from .nodes.nodes_video import JimengSeedance1, JimengSeedance1_5, JimengReferenceImage2Video, JimengVideoQueryTasks
+    from .nodes.nodes_visual import JimengVisualUnderstanding
+    from .nodes.quota import JimengQuotaSettings
+
+    _registered_nodes = [
+        JimengAPIClient,
+        JimengSeedream3,
+        JimengSeedream4,
+        JimengSeedream5,
+        JimengSeedance1,
+        JimengSeedance1_5,
+        JimengReferenceImage2Video,
+        JimengVideoQueryTasks,
+        JimengVisualUnderstanding,
+        JimengQuotaSettings,
+    ]
+else:
+    _registered_nodes = []
 
 class JimengExtension(ComfyExtension):
     """
     Jimeng 插件扩展类，用于注册节点。
     """
     async def get_node_list(self) -> list[type]:
-        return [
-            JimengAPIClient,
-            JimengSeedream3,
-            JimengSeedream4,
-            JimengSeedream5,
-            JimengSeedance1,
-            JimengSeedance1_5,
-            JimengReferenceImage2Video,
-            JimengVideoQueryTasks,
-            JimengVisualUnderstanding,
-            #JimengProgressTest,
-            JimengQuotaSettings,
-        ]
+        return _registered_nodes
 
 async def comfy_entrypoint() -> ComfyExtension:
     """

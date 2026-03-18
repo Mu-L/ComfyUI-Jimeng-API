@@ -1,6 +1,7 @@
 import os
 import io
 import base64
+import hashlib
 import locale
 import json
 import re
@@ -61,6 +62,7 @@ GLOBAL_CATEGORY = "JimengAI"
 
 jimeng_api_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API_KEYS_FILE = os.path.join(jimeng_api_dir, "api_keys.json")
+FILES_UPLOAD_CACHE_FILE = os.path.join(jimeng_api_dir, "files_upload_cache.json")
 
 API_KEYS_CONFIG = []
 CURRENT_LANG = "en"
@@ -106,10 +108,20 @@ def log_msg(key, default_msg="", **kwargs):
     if not msg:
         msg = LOG_TRANSLATIONS["en"].get(key, default_msg)
     if msg:
+        raw_api_response = kwargs.pop("raw_api_response", None)
+        rendered_msg = msg
         try:
-            logger.info(msg.format(**kwargs))
+            rendered_msg = msg.format(**kwargs)
         except:
-            logger.info(msg)
+            pass
+        logger.info(rendered_msg)
+        if any(code in str(rendered_msg) for code in ("InvalidParameter", "MissingParameter")):
+            if raw_api_response is None:
+                raw_api_response = kwargs.get("e")
+            if raw_api_response is None:
+                raw_api_response = kwargs.get("msg")
+            if raw_api_response is not None:
+                logger.info(f"{LOG_PREFIX}Raw API response: {raw_api_response}")
 
 
 def get_node_count_in_workflow(class_type, prompt=None):
@@ -263,15 +275,202 @@ def validate_api_key(api_key: str) -> bool:
 FILES_UPLOAD_CACHE = {}
 
 
-async def upload_file_to_ark(client, file_path, fps=None):
+def _normalize_expire_seconds(expire_seconds):
+    expire_seconds = int(expire_seconds if expire_seconds is not None else 604800)
+    return max(86400, min(expire_seconds, 2592000))
+
+
+def _normalize_cache_key(cache_key):
+    if isinstance(cache_key, str):
+        try:
+            cache_key = json.loads(cache_key)
+        except Exception:
+            return None
+    if isinstance(cache_key, list):
+        cache_key = tuple(cache_key)
+    if not isinstance(cache_key, tuple):
+        return None
+    if len(cache_key) == 2:
+        file_path, fps = cache_key
+        expire_seconds = 604800
+    elif len(cache_key) == 3:
+        file_path, fps, expire_seconds = cache_key
+    else:
+        return None
+    if not isinstance(file_path, str) or not file_path:
+        return None
+    normalized_fps = float(fps) if fps is not None else None
+    normalized_expire_seconds = _normalize_expire_seconds(expire_seconds)
+    return (file_path, normalized_fps, normalized_expire_seconds)
+
+
+def _serialize_cache_key(cache_key):
+    return json.dumps(list(cache_key), ensure_ascii=False)
+
+
+def _compute_file_sha256(file_path):
+    hasher = hashlib.sha256()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            if chunk:
+                hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def load_files_upload_cache():
+    global FILES_UPLOAD_CACHE
+    FILES_UPLOAD_CACHE = {}
+    if not os.path.exists(FILES_UPLOAD_CACHE_FILE):
+        return
+    try:
+        with open(FILES_UPLOAD_CACHE_FILE, "r", encoding="utf-8") as f:
+            cache_data = json.load(f)
+        if not isinstance(cache_data, dict):
+            return
+        now_ts = int(time.time())
+        for raw_key, entry in cache_data.items():
+            cache_key = _normalize_cache_key(raw_key)
+            if cache_key is None or not isinstance(entry, dict):
+                continue
+            file_id = entry.get("file_id")
+            expire_at = int(entry.get("expire_at", 0) or 0)
+            if file_id and expire_at > now_ts:
+                FILES_UPLOAD_CACHE[cache_key] = {
+                    "file_id": file_id,
+                    "expire_at": expire_at
+                }
+    except Exception as e:
+        logger.error(f"Failed to load upload cache: {e}")
+
+
+def save_files_upload_cache():
+    now_ts = int(time.time())
+    serializable_data = {}
+    for raw_key, entry in FILES_UPLOAD_CACHE.items():
+        cache_key = _normalize_cache_key(raw_key)
+        if cache_key is None or not isinstance(entry, dict):
+            continue
+        file_id = entry.get("file_id")
+        expire_at = int(entry.get("expire_at", 0) or 0)
+        if file_id and expire_at > now_ts:
+            serializable_data[_serialize_cache_key(cache_key)] = {
+                "file_id": file_id,
+                "expire_at": expire_at
+            }
+    try:
+        with open(FILES_UPLOAD_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(serializable_data, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        logger.error(f"Failed to save upload cache: {e}")
+
+
+load_files_upload_cache()
+
+
+async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800, return_meta=False):
     """
     使用 client.ark.files.create 上传文件。
     """
     global FILES_UPLOAD_CACHE
     
-    if file_path in FILES_UPLOAD_CACHE:
-        log_msg("visual_found_file", path=file_path)
-        return FILES_UPLOAD_CACHE[file_path]
+    expire_seconds = _normalize_expire_seconds(expire_seconds)
+    if fps is None:
+        try:
+            file_identity = f"sha256:{_compute_file_sha256(file_path)}"
+        except Exception:
+            file_identity = file_path
+    else:
+        file_identity = file_path
+    cache_key = (file_identity, float(fps) if fps is not None else None, expire_seconds)
+    cache_fps = float(fps) if fps is not None else None
+    now_ts = int(time.time())
+    expire_at = now_ts + expire_seconds
+
+    cached_entry = FILES_UPLOAD_CACHE.get(cache_key)
+    legacy_path_key = None
+    matched_cache_key = cache_key
+    if cached_entry is None and fps is None and file_identity != file_path:
+        legacy_path_key = (file_path, None, expire_seconds)
+        cached_entry = FILES_UPLOAD_CACHE.get(legacy_path_key)
+        if cached_entry is not None:
+            matched_cache_key = legacy_path_key
+    if isinstance(cached_entry, dict):
+        cached_file_id = cached_entry.get("file_id")
+        cached_expire_at = int(cached_entry.get("expire_at", 0) or 0)
+        if cached_file_id:
+            try:
+                remote_file_info = await asyncio.to_thread(
+                    client.ark.files.retrieve,
+                    file_id=cached_file_id
+                )
+                remote_status = getattr(remote_file_info, "status", "unknown")
+                remote_expire_at = int(getattr(remote_file_info, "expire_at", 0) or 0)
+                if remote_status == "active" and remote_expire_at > now_ts:
+                    cached_entry["expire_at"] = remote_expire_at
+                    if legacy_path_key is not None and legacy_path_key in FILES_UPLOAD_CACHE:
+                        FILES_UPLOAD_CACHE.pop(legacy_path_key, None)
+                        FILES_UPLOAD_CACHE[cache_key] = cached_entry
+                    save_files_upload_cache()
+                    log_msg("visual_found_file", path=file_path)
+                    if return_meta:
+                        return {
+                            "file_id": cached_file_id,
+                            "expire_at": remote_expire_at
+                        }
+                    return cached_file_id
+            except Exception:
+                if cached_expire_at > now_ts:
+                    if legacy_path_key is not None and legacy_path_key in FILES_UPLOAD_CACHE:
+                        FILES_UPLOAD_CACHE.pop(legacy_path_key, None)
+                        FILES_UPLOAD_CACHE[cache_key] = cached_entry
+                        save_files_upload_cache()
+                    log_msg("visual_found_file", path=file_path)
+                    if return_meta:
+                        return {
+                            "file_id": cached_file_id,
+                            "expire_at": cached_expire_at
+                        }
+                    return cached_file_id
+        FILES_UPLOAD_CACHE.pop(matched_cache_key, None)
+        save_files_upload_cache()
+    elif cached_entry is not None:
+        FILES_UPLOAD_CACHE.pop(cache_key, None)
+        save_files_upload_cache()
+
+    identity_candidates = {file_identity}
+    if fps is None and file_identity != file_path:
+        identity_candidates.add(file_path)
+    stale_keys = []
+    for existing_key in list(FILES_UPLOAD_CACHE.keys()):
+        normalized_existing_key = _normalize_cache_key(existing_key)
+        if normalized_existing_key is None:
+            continue
+        existing_identity, existing_fps, existing_expire_seconds = normalized_existing_key
+        if (
+            existing_identity in identity_candidates
+            and existing_fps == cache_fps
+            and existing_expire_seconds != expire_seconds
+        ):
+            stale_keys.append(existing_key)
+
+    if stale_keys and hasattr(client.ark, "files"):
+        cache_changed = False
+        for stale_key in stale_keys:
+            stale_entry = FILES_UPLOAD_CACHE.get(stale_key)
+            if isinstance(stale_entry, dict):
+                stale_file_id = stale_entry.get("file_id")
+                if stale_file_id:
+                    try:
+                        await asyncio.to_thread(
+                            client.ark.files.delete,
+                            file_id=stale_file_id
+                        )
+                    except Exception as e:
+                        logger.error(f"Delete stale file failed for {stale_file_id}: {e}")
+            FILES_UPLOAD_CACHE.pop(stale_key, None)
+            cache_changed = True
+        if cache_changed:
+            save_files_upload_cache()
         
     try:
         log_msg("visual_uploading", path=file_path)
@@ -280,7 +479,8 @@ async def upload_file_to_ark(client, file_path, fps=None):
                 
                 upload_kwargs = {
                     "file": f,
-                    "purpose": "user_data"
+                    "purpose": "user_data",
+                    "expire_at": expire_at
                 }
                 
                 if fps is not None:
@@ -302,7 +502,16 @@ async def upload_file_to_ark(client, file_path, fps=None):
                     
                     await wait_for_file_active(client, file_id)
                     
-                    FILES_UPLOAD_CACHE[file_path] = file_id
+                    FILES_UPLOAD_CACHE[cache_key] = {
+                        "file_id": file_id,
+                        "expire_at": expire_at
+                    }
+                    save_files_upload_cache()
+                    if return_meta:
+                        return {
+                            "file_id": file_id,
+                            "expire_at": expire_at
+                        }
                     return file_id
                 else:
                     raise JimengException("Upload failed: No file ID returned.")
@@ -319,9 +528,8 @@ async def wait_for_file_active(client, file_id):
     轮询文件状态，直到其变为“active”状态。
     """
     log_msg("visual_wait_active", id=file_id)
-    max_retries = 60
     
-    for _ in range(max_retries):
+    while True:
         try:
             file_info = await asyncio.to_thread(
                 client.ark.files.retrieve,
@@ -340,8 +548,6 @@ async def wait_for_file_active(client, file_id):
         except Exception as e:
             logger.error(f"Error checking file status: {e}")
             await asyncio.sleep(1)
-            
-    raise JimengException(f"Timeout waiting for file {file_id} to become active.")
 
 
 def _tensor2images(tensor: torch.Tensor) -> list:

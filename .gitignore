@@ -33,3 +33,4 @@ venv.bak/
 api_keys.json
 AGENTS.md
 V3开发指南.md
+files_upload_cache.json

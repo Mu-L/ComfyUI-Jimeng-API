@@ -24,6 +24,7 @@ VIDEO_MAX_SEED = 4294967295
 VIDEO_DEFAULT_TIMEOUT = 172800
 VIDEO_MIN_TIMEOUT = 3600
 VIDEO_MAX_TIMEOUT = 259200
+DEFAULT_VISUAL_SYSTEM_PROMPT = "你叫豆包，是由字节跳动开发的AI。"
 VIDEO_FRAME_RATE = 24.0
 VIDEO_MIN_FRAMES = 29
 VIDEO_MAX_FRAMES = 289
@@ -136,13 +137,10 @@ LOG_TRANSLATIONS = {
         "visual_cached_id": "已缓存 response_id 用于下一轮: {id}",
         "visual_stream_start": "开始流式响应...",
         "visual_stream_complete": "流式响应完成。",
-        "visual_task_created": "响应任务已创建: {id}",
+        "visual_task_created": "响应任务已创建",
         "visual_polling": "正在轮询响应任务: {id}",
         "visual_task_complete": "任务 {id} 完成。",
         "visual_task_failed": "任务 {id} 失败: {msg}",
-        "visual_warn_del_temp": "警告: 删除临时文件 {path} 失败: {e}",
-        "visual_warn_no_id": "警告: 输入 {i} 未获取到 file_id",
-        "visual_warn_no_history": "警告: turns > 1 但未找到历史记录。开始新对话。",
 
         # API 错误码映射
         "api_errors": {
@@ -257,13 +255,10 @@ LOG_TRANSLATIONS = {
         "visual_cached_id": "Cached response_id for next turn: {id}",
         "visual_stream_start": "Starting Streaming Response...",
         "visual_stream_complete": "Stream Completed.",
-        "visual_task_created": "Response Task Created: {id}",
+        "visual_task_created": "Response Task Created",
         "visual_polling": "Polling Response Task: {id}",
         "visual_task_complete": "Task {id} completed.",
         "visual_task_failed": "Task {id} failed: {msg}",
-        "visual_warn_del_temp": "Warning: Failed to delete temp file {path}: {e}",
-        "visual_warn_no_id": "Warning: No file_id obtained for input {i}",
-        "visual_warn_no_history": "Warning: turns > 1 but no previous history found. Starting new conversation.",
 
         "api_errors": {
             "AuthenticationError": "Invalid API Key (401). Please check api_keys.json.",
