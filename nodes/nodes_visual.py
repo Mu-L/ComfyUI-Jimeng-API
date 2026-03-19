@@ -4,7 +4,6 @@ import json
 import os
 import asyncio
 import hashlib
-import time
 import torch
 import aiohttp
 from comfy_api.latest import io as comfy_io
@@ -97,8 +96,6 @@ class JimengVisualUnderstanding(comfy_io.ComfyNode):
         inputs_content = []
         normalized_file_expire_seconds = int(file_expire_seconds if file_expire_seconds is not None else 604800)
         normalized_file_expire_seconds = max(86400, min(normalized_file_expire_seconds, 2592000))
-        response_expire_at = int(time.time()) + normalized_file_expire_seconds
-        min_file_expire_at = None
         
         if user_prompt:
             inputs_content.append({"type": "input_text", "text": user_prompt})
@@ -170,23 +167,12 @@ class JimengVisualUnderstanding(comfy_io.ComfyNode):
                     input_type = "input_video"
             
             if file_path and os.path.exists(file_path):
-                upload_result = await upload_file_to_ark(
+                file_id = await upload_file_to_ark(
                     client,
                     file_path,
                     fps=fps if input_type == "input_video" else None,
-                    expire_seconds=normalized_file_expire_seconds,
-                    return_meta=True
+                    expire_seconds=normalized_file_expire_seconds
                 )
-                if isinstance(upload_result, dict):
-                    file_id = upload_result.get("file_id")
-                    file_expire_at = int(upload_result.get("expire_at", 0) or 0)
-                    if file_expire_at > 0:
-                        if min_file_expire_at is None:
-                            min_file_expire_at = file_expire_at
-                        else:
-                            min_file_expire_at = min(min_file_expire_at, file_expire_at)
-                else:
-                    file_id = upload_result
 
             if file_id:
                 content_item = {
@@ -216,10 +202,7 @@ class JimengVisualUnderstanding(comfy_io.ComfyNode):
         
         payload = {
             "model": model_id,
-            "expire_at": response_expire_at,
         }
-        if min_file_expire_at is not None:
-            payload["expire_at"] = min(payload["expire_at"], min_file_expire_at)
         
         if previous_response_id:
             payload["previous_response_id"] = previous_response_id
