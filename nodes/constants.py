@@ -92,7 +92,7 @@ LOG_TRANSLATIONS = {
         "download_retry": "下载失败 (尝试 {attempt}/{total})。{delay}秒后重试... 错误: {e}",
         
         # 流式生成
-        "stream_recv_image": "第 {index} 张图片生成完毕，正在后台下载...",
+        "stream_recv_image": "第 {index} 张图片生成完毕。",
         "stream_partial_fail": "第 {index} 张图片生成失败: {msg}",
 
         # 弹窗提示
@@ -217,7 +217,7 @@ LOG_TRANSLATIONS = {
         "err_task_fail_ignored": "⚠️ Node {node_id} task failed (Ignored in concurrent mode): {msg}",
         "debug_node_count": "Debug: Detected {count} {type} nodes.",
         "download_retry": "Warning: Download failed (Attempt {attempt}/{total}). Retrying in {delay}s... Error: {e}",
-        "stream_recv_image": "Streaming: Image {index} generated, downloading in background...",
+        "stream_recv_image": "Streaming: Image {index} generated.",
         "stream_partial_fail": "Streaming Warning: Image {index} failed: {msg}",
         "popup_req_failed": "Request failed: {msg}",
         "popup_task_failed": "Task {task_id} failed: {msg}",

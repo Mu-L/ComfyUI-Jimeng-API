@@ -1,6 +1,7 @@
 import os
 import io
 import time
+import base64
 import asyncio
 import aiohttp
 import torch
@@ -13,6 +14,34 @@ from .nodes_shared import log_msg
 
 DEFAULT_DOWNLOAD_TIMEOUT = 60
 DEFAULT_DOWNLOAD_RETRIES = 3
+
+
+def _image_bytes_to_tensor(image_data: bytes) -> torch.Tensor:
+    i = PIL.Image.open(io.BytesIO(image_data))
+    image = i.convert("RGB")
+    image = numpy.array(image).astype(numpy.float32) / 255.0
+    return torch.from_numpy(image)[None,]
+
+
+async def image_bytes_to_tensor_async(image_data: bytes) -> torch.Tensor | None:
+    if not image_data:
+        return None
+    try:
+        return await asyncio.to_thread(_image_bytes_to_tensor, image_data)
+    except Exception as e:
+        log_msg("err_convert_tensor", e=e)
+        return None
+
+
+async def b64_image_to_tensor_async(b64_data: str) -> torch.Tensor | None:
+    if not b64_data:
+        return None
+    try:
+        image_data = base64.b64decode(b64_data)
+    except Exception as e:
+        log_msg("err_convert_tensor", e=e)
+        return None
+    return await image_bytes_to_tensor_async(image_data)
 
 
 async def _fetch_data_from_url_async(
@@ -59,10 +88,7 @@ async def download_url_to_image_tensor_async(
         return None
     try:
         image_data = await _fetch_data_from_url_async(session, url)
-        i = PIL.Image.open(io.BytesIO(image_data))
-        image = i.convert("RGB")
-        image = numpy.array(image).astype(numpy.float32) / 255.0
-        return torch.from_numpy(image)[None,]
+        return await image_bytes_to_tensor_async(image_data)
     except Exception as e:
         log_msg("err_download_url", url=url, e=e)
         return None
@@ -209,13 +235,7 @@ async def download_image_to_temp(
 
     tensor = None
     if path and data:
-        try:
-            i = PIL.Image.open(io.BytesIO(data))
-            image = i.convert("RGB")
-            image = numpy.array(image).astype(numpy.float32) / 255.0
-            tensor = torch.from_numpy(image)[None,]
-        except Exception as e:
-            log_msg("err_convert_tensor", e=e)
+        tensor = await image_bytes_to_tensor_async(data)
 
     return (tensor, path)
 

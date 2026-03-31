@@ -23,7 +23,7 @@ from server import PromptServer
 from .nodes_shared import log_msg, format_api_error, get_text, JimengException, create_white_image_tensor, create_white_video_file, safe_cat_tensors
 from .constants import JIMENG_API_BASE_URL
 from .models_config import VIDEO_MODEL_MAP, VIDEO_2_UI_OPTIONS
-from .utils_download import download_url_to_image_tensor_async
+from .utils_download import b64_image_to_tensor_async
 
 DEFAULT_FALLBACK_PER_SEC = 12
 DEFAULT_FALLBACK_BASE = 20
@@ -803,10 +803,11 @@ class JimengGenerationExecutor:
                         continue
 
                     if event.type == "image_generation.partial_succeeded":
-                        if event.error is None and event.url:
+                        b64_json = getattr(event, "b64_json", None)
+                        if event.error is None and b64_json:
                             data = {
-                                "type": "url",
-                                "url": event.url,
+                                "type": "b64_image",
+                                "b64_json": b64_json,
                                 "index": event.image_index + 1,
                                 "size": getattr(event, "size", None),
                             }
@@ -856,7 +857,7 @@ class JimengGenerationExecutor:
 
         asyncio.create_task(asyncio.to_thread(_producer_thread))
 
-        download_tasks = []
+        decode_tasks = []
         final_metadata = {
             "batch_index": idx,
             "created": int(time.time()),
@@ -879,32 +880,35 @@ class JimengGenerationExecutor:
                         key = item.get("key")
                         log_kwargs = item.get("kwargs", {})
                         log_msg(key, **log_kwargs)
+                elif item["type"] == "b64_image":
+                    idx_in_group = item["index"]
+                    b64_json = item.get("b64_json")
+                    if b64_json:
+                        if enable_group_generation and generation_count == 1:
+                            log_msg("stream_recv_image", index=idx_in_group)
+
+                        async def _decode_b64_wrapper(d_idx, d_b64, d_size):
+                            tensor = await b64_image_to_tensor_async(d_b64)
+                            return (d_idx, tensor, d_size)
+
+                        decode_tasks.append(
+                            asyncio.create_task(
+                                _decode_b64_wrapper(
+                                    idx_in_group, b64_json, item.get("size")
+                                )
+                            )
+                        )
                 elif item["type"] == "completed":
                     final_metadata["usage"] = item["usage"]
                     if "model" in item:
                         final_metadata["model"] = item["model"]
                     if "created" in item:
                         final_metadata["created"] = item["created"]
-                elif item["type"] == "url":
-                    url = item["url"]
-                    idx_in_group = item["index"]
 
-                    if enable_group_generation and generation_count == 1:
-                        log_msg("stream_recv_image", index=idx_in_group, url=url)
-
-                    async def _download_wrapper(d_url, d_idx):
-                        tensor = await download_url_to_image_tensor_async(
-                            session, d_url
-                        )
-                        return (d_idx, tensor, d_url)
-
-                    task = asyncio.create_task(_download_wrapper(url, idx_in_group))
-                    download_tasks.append(task)
-
-            if not download_tasks:
+            if not decode_tasks:
                 raise JimengException(get_text("err_batch_fail_all"))
 
-            results = await asyncio.gather(*download_tasks)
+            results = await asyncio.gather(*decode_tasks)
             valid_results = [r for r in results if r[1] is not None]
 
             if not valid_results:
@@ -913,9 +917,11 @@ class JimengGenerationExecutor:
             valid_results.sort(key=lambda x: x[0])
 
             output_tensors = []
-            for v_idx, tensor, url in valid_results:
+            for v_idx, tensor, size in valid_results:
                 output_tensors.append(tensor)
-                final_metadata["images"].append({"url": url, "index": v_idx})
+                final_metadata["images"].append(
+                    {"index": v_idx, "size": size, "source": "b64_json"}
+                )
 
             return safe_cat_tensors(output_tensors), final_metadata
 
