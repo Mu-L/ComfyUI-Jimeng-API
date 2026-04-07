@@ -8,6 +8,9 @@ import json
 import math
 import logging
 import base64
+import io
+import wave
+from urllib.parse import urlparse
 
 import folder_paths
 import comfy.model_management
@@ -32,7 +35,8 @@ from .nodes_shared import (
     create_white_video_file,
 )
 from .nodes_video_schema import (
-    get_common_video_inputs,
+    get_common_video_seed_inputs,
+    get_common_video_runtime_inputs,
     get_duration_input,
     get_resolution_input,
     get_aspect_ratio_input,
@@ -75,6 +79,26 @@ def _raise_if_text_params(prompt: str, text_params: list[str]) -> None:
 
 from .constants import VIDEO_MAX_SEED, VIDEO_DEFAULT_TIMEOUT
 
+IMAGE_MIN_EDGE = 300
+IMAGE_MAX_EDGE = 6000
+IMAGE_MIN_RATIO = 0.4
+IMAGE_MAX_RATIO = 2.5
+REF_IMAGE_MAX_SIZE_MB = 30.0
+REF_IMAGE_MAX_TOTAL_REQUEST_MB = 64.0
+
+REF_VIDEO_MIN_DURATION = 2.0
+REF_VIDEO_MAX_DURATION = 15.0
+REF_VIDEO_MAX_TOTAL_DURATION = 15.0
+REF_VIDEO_MAX_SIZE_MB = 50.0
+REF_VIDEO_MIN_PIXELS = 409600
+REF_VIDEO_MAX_PIXELS = 927408
+
+REF_AUDIO_MIN_DURATION = 2.0
+REF_AUDIO_MAX_DURATION = 15.0
+REF_AUDIO_MAX_TOTAL_DURATION = 15.0
+REF_AUDIO_MAX_SIZE_MB = 15.0
+REF_AUDIO_MAX_TOTAL_REQUEST_MB = 64.0
+
 class JimengVideoBase:
     """
     Jimeng 视频生成基类。
@@ -115,15 +139,239 @@ class JimengVideoBase:
 
     def _append_image_content(self, content_list, image, role):
         if image is not None:
+            image_b64 = _image_to_base64(image)
+            image_b64_size_mb = float(len(image_b64.encode("utf-8"))) / (1024.0 * 1024.0)
+            if image_b64_size_mb > REF_IMAGE_MAX_SIZE_MB:
+                raise JimengException(
+                    get_text("popup_ref_image_size_exceeded").format(
+                        max_mb=REF_IMAGE_MAX_SIZE_MB, size_mb=f"{image_b64_size_mb:.3f}"
+                    )
+                )
             content_list.append(
                 {
                     "type": "image_url",
                     "image_url": {
-                        "url": f"data:image/jpeg;base64,{_image_to_base64(image)}"
+                        "url": f"data:image/jpeg;base64,{image_b64}"
                     },
                     "role": role,
                 }
             )
+            return len(image_b64.encode("utf-8"))
+        return 0
+
+    def _extract_image_hw(self, image):
+        if image is None or not isinstance(image, torch.Tensor):
+            raise JimengException(get_text("popup_ref_image_hw_out_of_range").format(
+                min=IMAGE_MIN_EDGE, max=IMAGE_MAX_EDGE, width=0, height=0
+            ))
+        if image.ndim == 4:
+            return int(image.shape[2]), int(image.shape[1])
+        if image.ndim == 3:
+            return int(image.shape[1]), int(image.shape[0])
+        raise JimengException(get_text("popup_ref_image_hw_out_of_range").format(
+            min=IMAGE_MIN_EDGE, max=IMAGE_MAX_EDGE, width=0, height=0
+        ))
+
+    def _validate_reference_image_constraints(self, image):
+        if image is None:
+            return
+        width, height = self._extract_image_hw(image)
+        if (
+            width < IMAGE_MIN_EDGE
+            or width > IMAGE_MAX_EDGE
+            or height < IMAGE_MIN_EDGE
+            or height > IMAGE_MAX_EDGE
+        ):
+            raise JimengException(
+                get_text("popup_ref_image_hw_out_of_range").format(
+                    min=IMAGE_MIN_EDGE, max=IMAGE_MAX_EDGE, width=width, height=height
+                )
+            )
+        ratio = float(width) / float(height)
+        if ratio < IMAGE_MIN_RATIO or ratio > IMAGE_MAX_RATIO:
+            raise JimengException(
+                get_text("popup_ref_image_ratio_out_of_range").format(
+                    min=IMAGE_MIN_RATIO, max=IMAGE_MAX_RATIO, ratio=f"{ratio:.4f}"
+                )
+            )
+
+    def _validate_reference_video_url_format(self, video_url):
+        normalized_url = (video_url or "").strip()
+        if not normalized_url:
+            return
+        path = urlparse(normalized_url).path.lower()
+        if not (path.endswith(".mp4") or path.endswith(".mov")):
+            raise JimengException(get_text("popup_ref_video_url_format"))
+
+    def _get_video_stream_size_bytes(self, stream_source):
+        if isinstance(stream_source, str):
+            return os.path.getsize(stream_source)
+        if hasattr(stream_source, "getbuffer"):
+            return int(stream_source.getbuffer().nbytes)
+        if hasattr(stream_source, "getvalue"):
+            return len(stream_source.getvalue())
+        return 0
+
+    def _validate_single_reference_video(self, video):
+        try:
+            container_format = str(video.get_container_format() or "").lower()
+            width, height = video.get_dimensions()
+            duration = float(video.get_duration())
+            stream_source = video.get_stream_source()
+            size_bytes = self._get_video_stream_size_bytes(stream_source)
+        except Exception as e:
+            raise JimengException(get_text("popup_ref_video_invalid").format(msg=str(e)))
+
+        if ("mp4" not in container_format) and ("mov" not in container_format):
+            raise JimengException(
+                get_text("popup_ref_video_format").format(fmt=container_format or "unknown")
+            )
+
+        if (
+            width < IMAGE_MIN_EDGE
+            or width > IMAGE_MAX_EDGE
+            or height < IMAGE_MIN_EDGE
+            or height > IMAGE_MAX_EDGE
+        ):
+            raise JimengException(
+                get_text("popup_ref_video_hw_out_of_range").format(
+                    min=IMAGE_MIN_EDGE, max=IMAGE_MAX_EDGE, width=width, height=height
+                )
+            )
+
+        ratio = float(width) / float(height)
+        if ratio < IMAGE_MIN_RATIO or ratio > IMAGE_MAX_RATIO:
+            raise JimengException(
+                get_text("popup_ref_video_ratio_out_of_range").format(
+                    min=IMAGE_MIN_RATIO, max=IMAGE_MAX_RATIO, ratio=f"{ratio:.4f}"
+                )
+            )
+
+        pixels = int(width) * int(height)
+        if pixels < REF_VIDEO_MIN_PIXELS or pixels > REF_VIDEO_MAX_PIXELS:
+            raise JimengException(
+                get_text("popup_ref_video_pixels_out_of_range").format(
+                    min=REF_VIDEO_MIN_PIXELS, max=REF_VIDEO_MAX_PIXELS, pixels=pixels
+                )
+            )
+
+        if duration < REF_VIDEO_MIN_DURATION or duration > REF_VIDEO_MAX_DURATION:
+            raise JimengException(
+                get_text("popup_ref_video_duration_out_of_range").format(
+                    min=REF_VIDEO_MIN_DURATION,
+                    max=REF_VIDEO_MAX_DURATION,
+                    duration=f"{duration:.3f}",
+                )
+            )
+
+        size_mb = float(size_bytes) / (1024.0 * 1024.0)
+        if size_mb > REF_VIDEO_MAX_SIZE_MB:
+            raise JimengException(
+                get_text("popup_ref_video_size_exceeded").format(
+                    max_mb=REF_VIDEO_MAX_SIZE_MB, size_mb=f"{size_mb:.3f}"
+                )
+            )
+
+        return duration
+
+    def _validate_reference_videos_constraints(self, ref_videos, ref_video_urls=None):
+        if ref_video_urls is None:
+            ref_video_urls = []
+        total_duration = 0.0
+        for v in ref_videos:
+            if v is None:
+                continue
+            total_duration += self._validate_single_reference_video(v)
+
+        if total_duration > REF_VIDEO_MAX_TOTAL_DURATION:
+            raise JimengException(
+                get_text("popup_ref_video_total_duration_exceeded").format(
+                    max=REF_VIDEO_MAX_TOTAL_DURATION, duration=f"{total_duration:.3f}"
+                )
+            )
+
+        for video_url in ref_video_urls:
+            self._validate_reference_video_url_format(video_url)
+
+    def _append_media_url_content(self, content_list, media_url, media_type, role):
+        normalized_url = (media_url or "").strip()
+        if not normalized_url:
+            return
+        content_list.append(
+            {
+                "type": media_type,
+                media_type: {"url": normalized_url},
+                "role": role,
+            }
+        )
+
+    def _audio_to_data_uri(self, audio):
+        if audio is None:
+            return None
+
+        waveform = audio.get("waveform")
+        sample_rate = int(audio.get("sample_rate", audio.get("sampler_rate", 0)) or 0)
+        if waveform is None or sample_rate <= 0:
+            raise JimengException(get_text("popup_audio_invalid"))
+
+        if not isinstance(waveform, torch.Tensor):
+            raise JimengException(get_text("popup_audio_invalid"))
+
+        if waveform.ndim != 3 or waveform.shape[0] < 1:
+            raise JimengException(get_text("popup_audio_invalid"))
+
+        audio_tensor = waveform[0].detach().cpu()
+        if audio_tensor.ndim != 2:
+            raise JimengException(get_text("popup_audio_invalid"))
+
+        audio_tensor = torch.clamp(audio_tensor, -1.0, 1.0)
+        sample_count = int(audio_tensor.shape[1])
+        duration = float(sample_count) / float(sample_rate)
+        if duration < REF_AUDIO_MIN_DURATION or duration > REF_AUDIO_MAX_DURATION:
+            raise JimengException(
+                get_text("popup_ref_audio_duration_out_of_range").format(
+                    min=REF_AUDIO_MIN_DURATION,
+                    max=REF_AUDIO_MAX_DURATION,
+                    duration=f"{duration:.3f}",
+                )
+            )
+
+        audio_np = (audio_tensor.numpy() * 32767.0).astype(numpy.int16)
+        audio_np = numpy.ascontiguousarray(audio_np.T)
+        channel_count = int(audio_np.shape[1]) if audio_np.ndim == 2 else 1
+
+        with io.BytesIO() as buffer:
+            with wave.open(buffer, "wb") as wav_file:
+                wav_file.setnchannels(channel_count)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(sample_rate)
+                wav_file.writeframes(audio_np.tobytes())
+            wav_bytes = buffer.getvalue()
+            base64_audio = base64.b64encode(wav_bytes).decode("utf-8")
+            size_mb = float(len(base64_audio.encode("utf-8"))) / (1024.0 * 1024.0)
+            if size_mb > REF_AUDIO_MAX_SIZE_MB:
+                raise JimengException(
+                    get_text("popup_ref_audio_size_exceeded").format(
+                        max_mb=REF_AUDIO_MAX_SIZE_MB, size_mb=f"{size_mb:.3f}"
+                    )
+                )
+
+        data_uri = f"data:audio/wav;base64,{base64_audio}"
+        return data_uri, duration, len(data_uri.encode("utf-8"))
+
+    def _append_audio_content(self, content_list, audio, role):
+        audio_data = self._audio_to_data_uri(audio)
+        if audio_data is None:
+            return None
+        audio_data_uri, duration, request_bytes = audio_data
+        content_list.append(
+            {
+                "type": "audio_url",
+                "audio_url": {"url": audio_data_uri},
+                "role": role,
+            }
+        )
+        return duration, request_bytes
 
     async def _handle_batch_success_async(
         self,
@@ -312,7 +560,8 @@ class JimengVideoBase:
             )
             client.check_quota(model_name, est_tokens_per_video * generation_count)
 
-            content.insert(0, {"type": "text", "text": prompt})
+            if prompt:
+                content.insert(0, {"type": "text", "text": prompt})
             comfy.model_management.throw_exception_if_processing_interrupted()
 
             ignore_errors = False
@@ -401,14 +650,17 @@ class JimengSeedance1(JimengVideoBase, comfy_io.ComfyNode):
                     default=VIDEO_1_UI_OPTIONS[0],
                 ),
                 comfy_io.String.Input("prompt", multiline=True, default=""),
+            ]
+            + get_common_video_seed_inputs()
+            + [
+                get_resolution_input(default="720p", support_1080p=True),
+                get_aspect_ratio_input(default="adaptive", include_adaptive=True),
                 get_duration_input(
                     default=5.0, min_val=1.2, max_val=12.0, step=0.2, is_int=False
                 ),
-                get_resolution_input(default="720p", support_1080p=True),
-                get_aspect_ratio_input(default="adaptive", include_adaptive=True),
                 comfy_io.Boolean.Input("camerafixed", default=True),
             ]
-            + get_common_video_inputs()
+            + get_common_video_runtime_inputs(include_offline=True)
             + [
                 comfy_io.Image.Input("image", optional=True),
                 comfy_io.Image.Input("last_frame_image", optional=True),
@@ -452,13 +704,25 @@ class JimengSeedance1(JimengVideoBase, comfy_io.ComfyNode):
         helper = JimengVideoBase()
         helper.NON_BLOCKING_TASK_CACHE = cls.NON_BLOCKING_TASK_CACHE
 
+        helper._validate_reference_image_constraints(image)
+        helper._validate_reference_image_constraints(last_frame_image)
+
         content = []
-        helper._append_image_content(content, image, "first_frame")
+        total_image_request_bytes = 0
+        total_image_request_bytes += helper._append_image_content(content, image, "first_frame")
 
         if last_frame_image is not None:
             if image is None:
                 raise JimengException(get_text("popup_first_frame_missing"))
-            helper._append_image_content(content, last_frame_image, "last_frame")
+            total_image_request_bytes += helper._append_image_content(content, last_frame_image, "last_frame")
+
+        total_image_request_mb = float(total_image_request_bytes) / (1024.0 * 1024.0)
+        if total_image_request_mb > REF_IMAGE_MAX_TOTAL_REQUEST_MB:
+            raise JimengException(
+                get_text("popup_ref_image_total_size_exceeded").format(
+                    max_mb=REF_IMAGE_MAX_TOTAL_REQUEST_MB, size_mb=f"{total_image_request_mb:.3f}"
+                )
+            )
 
         service_tier, execution_expires_after = helper._get_service_options(
             enable_offline_inference, VIDEO_DEFAULT_TIMEOUT
@@ -515,17 +779,20 @@ class JimengSeedance1_5(JimengVideoBase, comfy_io.ComfyNode):
                     default=VIDEO_1_5_UI_OPTIONS[0],
                 ),
                 comfy_io.String.Input("prompt", multiline=True, default=""),
+            ]
+            + get_common_video_seed_inputs()
+            + [
+                get_resolution_input(default="720p", support_1080p=True),
+                get_aspect_ratio_input(default="adaptive", include_adaptive=True),
+                comfy_io.Boolean.Input("auto_duration", default=False),
+                get_duration_input(default=5, min_val=4, max_val=12, is_int=True),
+                comfy_io.Boolean.Input("generate_audio", default=True),
                 comfy_io.Boolean.Input("draft_mode", default=False),
                 comfy_io.Boolean.Input("reuse_last_draft_task", default=False),
                 comfy_io.String.Input("draft_task_id", default=""),
-                comfy_io.Boolean.Input("generate_audio", default=True),
-                comfy_io.Boolean.Input("auto_duration", default=False),
-                get_duration_input(default=5, min_val=4, max_val=12, is_int=True),
-                get_resolution_input(default="720p", support_1080p=True),
-                get_aspect_ratio_input(default="adaptive", include_adaptive=True),
                 comfy_io.Boolean.Input("camerafixed", default=True),
             ]
-            + get_common_video_inputs()
+            + get_common_video_runtime_inputs(include_offline=True)
             + [
                 comfy_io.Image.Input("image", optional=True),
                 comfy_io.Image.Input("last_frame_image", optional=True),
@@ -608,6 +875,9 @@ class JimengSeedance1_5(JimengVideoBase, comfy_io.ComfyNode):
         helper = JimengVideoBase()
         helper.NON_BLOCKING_TASK_CACHE = cls.NON_BLOCKING_TASK_CACHE
 
+        helper._validate_reference_image_constraints(image)
+        helper._validate_reference_image_constraints(last_frame_image)
+
         service_tier, execution_expires_after = helper._get_service_options(
             enable_offline_inference, VIDEO_DEFAULT_TIMEOUT
         )
@@ -662,12 +932,21 @@ class JimengSeedance1_5(JimengVideoBase, comfy_io.ComfyNode):
             return ret_results
 
         content = []
-        helper._append_image_content(content, image, "first_frame")
+        total_image_request_bytes = 0
+        total_image_request_bytes += helper._append_image_content(content, image, "first_frame")
 
         if last_frame_image is not None:
             if image is None:
                 raise JimengException(get_text("popup_first_frame_missing"))
-            helper._append_image_content(content, last_frame_image, "last_frame")
+            total_image_request_bytes += helper._append_image_content(content, last_frame_image, "last_frame")
+
+        total_image_request_mb = float(total_image_request_bytes) / (1024.0 * 1024.0)
+        if total_image_request_mb > REF_IMAGE_MAX_TOTAL_REQUEST_MB:
+            raise JimengException(
+                get_text("popup_ref_image_total_size_exceeded").format(
+                    max_mb=REF_IMAGE_MAX_TOTAL_REQUEST_MB, size_mb=f"{total_image_request_mb:.3f}"
+                )
+            )
 
         final_duration = -1.0 if auto_duration else float(duration)
 
@@ -735,6 +1014,301 @@ class JimengSeedance1_5(JimengVideoBase, comfy_io.ComfyNode):
         return result
 
 
+class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
+    """
+    Jimeng Seedance 2.0 视频生成节点。
+    支持文本、图片、视频、音频多模态参考，以及视频编辑/延长等工作流。
+    """
+
+    @classmethod
+    def define_schema(cls) -> comfy_io.Schema:
+        return comfy_io.Schema(
+            node_id="JimengSeedance2",
+            display_name="Jimeng Seedance 2.0",
+            category=GLOBAL_CATEGORY,
+            is_output_node=True,
+            is_experimental=True,
+            inputs=[
+                JimengClientType.Input("client"),
+                comfy_io.Combo.Input(
+                    "model_version",
+                    options=VIDEO_2_UI_OPTIONS,
+                    default=VIDEO_2_UI_OPTIONS[0],
+                ),
+                comfy_io.String.Input("prompt", multiline=True, default=""),
+            ]
+            + get_common_video_seed_inputs()
+            + [
+                get_resolution_input(default="720p", support_1080p=False),
+                get_aspect_ratio_input(default="adaptive", include_adaptive=True),
+                comfy_io.Boolean.Input("auto_duration", default=False),
+                get_duration_input(default=5, min_val=4, max_val=15, is_int=True),
+                comfy_io.Boolean.Input("generate_audio", default=True),
+                comfy_io.Boolean.Input("enable_web_search", default=False),
+            ]
+            + get_common_video_runtime_inputs(include_offline=False)
+            + [
+                comfy_io.Image.Input("first_frame_image", optional=True),
+                comfy_io.Image.Input("last_frame_image", optional=True),
+                comfy_io.Image.Input("ref_image_1", optional=True),
+                comfy_io.Video.Input("ref_video_1", optional=True),
+                comfy_io.Audio.Input("ref_audio_1", optional=True),
+            ],
+            hidden=[
+                comfy_io.Hidden.auth_token_comfy_org,
+                comfy_io.Hidden.api_key_comfy_org,
+                comfy_io.Hidden.unique_id,
+                comfy_io.Hidden.prompt,
+            ],
+            outputs=[
+                comfy_io.Video.Output(display_name="video"),
+                comfy_io.Image.Output(display_name="last_frame"),
+                comfy_io.String.Output(display_name="response"),
+            ],
+        )
+
+    @classmethod
+    async def execute(
+        cls,
+        client,
+        model_version,
+        prompt,
+        generate_audio,
+        enable_web_search,
+        auto_duration,
+        duration,
+        resolution,
+        aspect_ratio,
+        enable_random_seed,
+        seed,
+        generation_count,
+        filename_prefix,
+        save_last_frame_batch,
+        non_blocking,
+        first_frame_image=None,
+        last_frame_image=None,
+        ref_image_1=None,
+        ref_image_2=None,
+        ref_image_3=None,
+        ref_image_4=None,
+        ref_image_5=None,
+        ref_image_6=None,
+        ref_image_7=None,
+        ref_image_8=None,
+        ref_image_9=None,
+        ref_video_1=None,
+        ref_video_2=None,
+        ref_video_3=None,
+        ref_audio_1=None,
+        ref_audio_2=None,
+        ref_audio_3=None,
+    ) -> comfy_io.NodeOutput:
+        node_id = cls.hidden.unique_id
+
+        helper = JimengVideoBase()
+        helper.NON_BLOCKING_TASK_CACHE = cls.NON_BLOCKING_TASK_CACHE
+
+        content = []
+        total_image_request_bytes = 0
+
+        for img in [
+            first_frame_image,
+            last_frame_image,
+            ref_image_1,
+            ref_image_2,
+            ref_image_3,
+            ref_image_4,
+            ref_image_5,
+            ref_image_6,
+            ref_image_7,
+            ref_image_8,
+            ref_image_9,
+        ]:
+            helper._validate_reference_image_constraints(img)
+
+        total_image_request_bytes += helper._append_image_content(
+            content, first_frame_image, "first_frame"
+        )
+        if last_frame_image is not None:
+            if first_frame_image is None:
+                raise JimengException(get_text("popup_first_frame_missing"))
+            total_image_request_bytes += helper._append_image_content(
+                content, last_frame_image, "last_frame"
+            )
+
+        has_any_reference_inputs = any(
+            img is not None
+            for img in [
+                ref_image_1,
+                ref_image_2,
+                ref_image_3,
+                ref_image_4,
+                ref_image_5,
+                ref_image_6,
+                ref_image_7,
+                ref_image_8,
+                ref_image_9,
+            ]
+        ) or any(v is not None for v in [ref_video_1, ref_video_2, ref_video_3]) or any(
+            audio is not None for audio in [ref_audio_1, ref_audio_2, ref_audio_3]
+        )
+
+        if (first_frame_image is not None or last_frame_image is not None) and has_any_reference_inputs:
+            raise JimengException(get_text("popup_first_last_conflict_with_refs"))
+
+        helper._validate_reference_videos_constraints(
+            [ref_video_1, ref_video_2, ref_video_3],
+        )
+
+        for img in [
+            ref_image_1,
+            ref_image_2,
+            ref_image_3,
+            ref_image_4,
+            ref_image_5,
+            ref_image_6,
+            ref_image_7,
+            ref_image_8,
+            ref_image_9,
+        ]:
+            total_image_request_bytes += helper._append_image_content(
+                content, img, "reference_image"
+            )
+
+        total_image_request_mb = float(total_image_request_bytes) / (1024.0 * 1024.0)
+        if total_image_request_mb > REF_IMAGE_MAX_TOTAL_REQUEST_MB:
+            raise JimengException(
+                get_text("popup_ref_image_total_size_exceeded").format(
+                    max_mb=REF_IMAGE_MAX_TOTAL_REQUEST_MB, size_mb=f"{total_image_request_mb:.3f}"
+                )
+            )
+
+        uploaded_video_urls: list[str | None] = [None, None, None]
+        ref_videos = [ref_video_1, ref_video_2, ref_video_3]
+        if any(v is not None for v in ref_videos):
+            try:
+                from comfy_api_nodes.util import upload_video_to_comfyapi
+            except Exception as e:
+                raise JimengException(get_text("popup_req_failed").format(msg=str(e)))
+            for idx, v in enumerate(ref_videos):
+                if v is None:
+                    continue
+                log_msg("upload_ref_video_start", index=idx + 1, total=3)
+                uploaded_video_urls[idx] = await upload_video_to_comfyapi(
+                    cls,
+                    v,
+                    wait_label=None,
+                )
+                log_msg("upload_ref_video_done", index=idx + 1, total=3)
+
+        final_video_urls = [
+            (uploaded_video_urls[0] or "").strip(),
+            (uploaded_video_urls[1] or "").strip(),
+            (uploaded_video_urls[2] or "").strip(),
+        ]
+        for video_url in final_video_urls:
+            helper._append_media_url_content(content, video_url, "video_url", "reference_video")
+
+        total_audio_duration = 0.0
+        total_audio_request_bytes = 0
+        for audio in [ref_audio_1, ref_audio_2, ref_audio_3]:
+            appended = helper._append_audio_content(content, audio, "reference_audio")
+            if appended is None:
+                continue
+            audio_duration, request_bytes = appended
+            total_audio_duration += audio_duration
+            total_audio_request_bytes += request_bytes
+
+        if total_audio_duration > REF_AUDIO_MAX_TOTAL_DURATION:
+            raise JimengException(
+                get_text("popup_ref_audio_total_duration_exceeded").format(
+                    max=REF_AUDIO_MAX_TOTAL_DURATION, duration=f"{total_audio_duration:.3f}"
+                )
+            )
+
+        total_audio_request_mb = float(total_audio_request_bytes) / (1024.0 * 1024.0)
+        if total_audio_request_mb > REF_AUDIO_MAX_TOTAL_REQUEST_MB:
+            raise JimengException(
+                get_text("popup_ref_audio_total_size_exceeded").format(
+                    max_mb=REF_AUDIO_MAX_TOTAL_REQUEST_MB,
+                    size_mb=f"{total_audio_request_mb:.3f}",
+                )
+            )
+
+        has_image_reference = any(
+            img is not None
+            for img in [
+                first_frame_image,
+                last_frame_image,
+                ref_image_1,
+                ref_image_2,
+                ref_image_3,
+                ref_image_4,
+                ref_image_5,
+                ref_image_6,
+                ref_image_7,
+                ref_image_8,
+                ref_image_9,
+            ]
+        )
+        has_video_reference = any(
+            (url or "").strip()
+            for url in final_video_urls
+        )
+        has_audio_reference = any(
+            audio is not None
+            for audio in [ref_audio_1, ref_audio_2, ref_audio_3]
+        )
+        prompt = (prompt or "").strip()
+
+        if not prompt and not content:
+            raise JimengException(get_text("popup_video_prompt_or_ref_required"))
+
+        if has_audio_reference and not (has_image_reference or has_video_reference):
+            raise JimengException(
+                get_text("popup_audio_requires_visual_ref")
+            )
+
+        if not has_image_reference and not has_video_reference and aspect_ratio == "adaptive":
+            aspect_ratio = "16:9"
+
+        final_duration = -1 if auto_duration else duration
+        extra_api_params = {
+            "generate_audio": generate_audio,
+        }
+        if enable_web_search:
+            extra_api_params["tools"] = [{"type": "web_search"}]
+
+        return await helper._common_generation_logic(
+            client,
+            prompt,
+            final_duration,
+            resolution,
+            aspect_ratio,
+            seed,
+            generation_count,
+            filename_prefix,
+            save_last_frame_batch,
+            non_blocking,
+            node_id,
+            model_name=resolve_model_id(model_version),
+            content=content,
+            forbidden_params=[
+                "resolution",
+                "ratio",
+                "dur",
+                "frames",
+                "seed",
+                "generate_audio",
+            ],
+            enable_random_seed=enable_random_seed,
+            is_auto_duration=auto_duration,
+            extra_api_params=extra_api_params,
+            node_class_type="JimengSeedance2",
+            workflow_prompt=cls.hidden.prompt,
+        )
+
+
 class JimengReferenceImage2Video(JimengVideoBase, comfy_io.ComfyNode):
     """
     Jimeng 参考图生视频节点。
@@ -747,16 +1321,20 @@ class JimengReferenceImage2Video(JimengVideoBase, comfy_io.ComfyNode):
             display_name="Jimeng Reference to Video",
             category=GLOBAL_CATEGORY,
             is_output_node=True,
+            is_deprecated=True,
             inputs=[
                 JimengClientType.Input("client"),
                 comfy_io.String.Input("prompt", multiline=True, default=""),
+            ]
+            + get_common_video_seed_inputs()
+            + [
+                get_resolution_input(default="720p", support_1080p=False),
+                get_aspect_ratio_input(default="16:9", include_adaptive=False),
                 get_duration_input(
                     default=5.0, min_val=1.2, max_val=12.0, step=0.2, is_int=False
                 ),
-                get_resolution_input(default="720p", support_1080p=False),
-                get_aspect_ratio_input(default="16:9", include_adaptive=False),
             ]
-            + get_common_video_inputs()
+            + get_common_video_runtime_inputs(include_offline=True)
             + [
                 comfy_io.Image.Input("ref_image_1", optional=True),
                 comfy_io.Image.Input("ref_image_2", optional=True),
@@ -846,12 +1424,14 @@ class JimengProgressTest(comfy_io.ComfyNode):
             else:
                 test_model_options.append(opt)
         test_model_options.extend(VIDEO_1_5_UI_OPTIONS)
+        test_model_options.extend(VIDEO_2_UI_OPTIONS)
 
         return comfy_io.Schema(
             node_id="JimengProgressTest",
             display_name="Jimeng Progress Test",
             category=GLOBAL_CATEGORY,
             is_output_node=True,
+            is_dev_only=True,
             inputs=[
                 comfy_io.Int.Input("duration_seconds", default=10, min=1, max=300),
                 comfy_io.Int.Input("steps", default=20, min=1, max=600),

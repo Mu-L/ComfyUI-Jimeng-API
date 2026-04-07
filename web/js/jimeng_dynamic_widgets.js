@@ -201,16 +201,20 @@ function widgetLogic(node, widget) {
     // 处理视频生成节点逻辑
     if (node.comfyClass === "JimengSeedance1" ||
         node.comfyClass === "JimengReferenceImage2Video" ||
-        node.comfyClass === "JimengSeedance1_5") {
+        node.comfyClass === "JimengSeedance1_5" ||
+        node.comfyClass === "JimengSeedance2") {
 
-        // 1.5版本特定逻辑：智能时长控制 & 样片模式联动
-        if (node.comfyClass === "JimengSeedance1_5") {
+        // 1.5/2.0 版本特定逻辑：智能时长控制
+        if (node.comfyClass === "JimengSeedance1_5" || node.comfyClass === "JimengSeedance2") {
             if (widget.name === 'auto_duration') {
                 const isAuto = widget.value === true;
                 const durationWidget = findWidgetByName(node, 'duration');
                 if (toggleWidget(node, durationWidget, !isAuto)) shouldResize = true;
             }
+        }
 
+        // 1.5版本特定逻辑：样片模式联动
+        if (node.comfyClass === "JimengSeedance1_5") {
             if (widget.name === 'draft_mode') {
                 const isDraftMode = widget.value === true;
                 const draftTaskWidget = findWidgetByName(node, 'draft_task_id');
@@ -371,7 +375,14 @@ app.registerExtension({
                         if (item.input.link !== null) {
                             const link = app.graph.links[item.input.link];
                             if (link) {
+                                if (link.target_id !== this.id) continue;
+                                let slotNum = 1;
+                                if (item.name !== 'images') {
+                                    const parsed = parseInt(item.name.slice(prefix.length), 10);
+                                    if (!Number.isNaN(parsed)) slotNum = parsed;
+                                }
                                 activeLinks.push({
+                                    slotNum,
                                     origin_id: link.origin_id,
                                     origin_slot: link.origin_slot,
                                     type: link.type
@@ -380,7 +391,7 @@ app.registerExtension({
                         }
                     }
 
-                    const targetStructure = [];
+                    activeLinks.sort((a, b) => a.slotNum - b.slotNum);
 
                     const neededSlots = activeLinks.length + 1;
                     const finalSlots = Math.min(neededSlots, MAX_INPUTS);
@@ -394,22 +405,27 @@ app.registerExtension({
                         }
                     }
 
-                    for (let k = 1; k < finalSlots; k++) {
-                        const name = `image_${k + 1}`;
+                    for (let slot = 2; slot <= finalSlots; slot++) {
+                        const name = `image_${slot}`;
                         this.addInput(name, "IMAGE");
-                        const inputIndex = this.inputs.length - 1;
-                        const input = this.inputs[inputIndex];
+                        const input = this.inputs[this.inputs.length - 1];
                         if (input) {
                             const isZh = navigator.language.startsWith("zh");
-                            input.label = isZh ? `图像 ${k + 1}` : `Image ${k + 1}`;
+                            input.label = isZh ? `图像 ${slot}` : `Image ${slot}`;
                         }
+                    }
+
+                    const nameToIndex = {};
+                    for (let i = 0; i < this.inputs.length; i++) {
+                        const n = this.inputs[i].name;
+                        if (n === 'images' || n.startsWith(prefix)) nameToIndex[n] = i;
                     }
 
                     for (let k = 0; k < activeLinks.length; k++) {
                         const linkInfo = activeLinks[k];
-                        const targetSlotIndex = firstDynamicIndex + k;
-
-                        const currentInput = this.inputs[targetSlotIndex];
+                        const targetName = (k === 0) ? 'images' : `image_${k + 1}`;
+                        const targetSlotIndex = nameToIndex[targetName];
+                        if (targetSlotIndex === undefined) continue;
 
                         const sourceNode = app.graph.getNodeById(linkInfo.origin_id);
                         if (sourceNode) {
@@ -419,6 +435,121 @@ app.registerExtension({
 
                     updateNodeHeight(this, extraHeight);
 
+                } catch (e) {
+                    console.error("[Jimeng] Error updating dynamic inputs:", e);
+                } finally {
+                    this._isUpdatingInputs = false;
+                }
+
+                return r;
+            };
+        }
+
+        if (node.comfyClass === "JimengSeedance2") {
+            const onConnectionsChange = node.onConnectionsChange;
+            node.onConnectionsChange = function (type, index, connected, link_info, slot) {
+                const r = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
+
+                if (this._isConfiguring) return r;
+                if (type !== 1) return r;
+                if (this._isUpdatingInputs) return r;
+                this._isUpdatingInputs = true;
+
+                try {
+                    let extraHeight = 0;
+                    if (this.size && this.computeSize && !this.flags?.collapsed) {
+                        const currentMinHeight = this.computeSize()[1];
+                        const currentActualHeight = this.size[1];
+                        extraHeight = Math.max(0, currentActualHeight - currentMinHeight);
+                    }
+
+                    const isZh = navigator.language.startsWith("zh");
+
+                    const updateGroup = (prefix, baseName, maxSlots, inputType, zhLabel, enLabel) => {
+                        const allInputs = this.inputs || [];
+                        let baseIndex = -1;
+                        const groupInputs = [];
+
+                        for (let i = 0; i < allInputs.length; i++) {
+                            const name = allInputs[i].name;
+                            if (name === baseName) {
+                                baseIndex = i;
+                                groupInputs.push({ index: i, name, input: allInputs[i] });
+                            } else if (name.startsWith(prefix)) {
+                                groupInputs.push({ index: i, name, input: allInputs[i] });
+                            }
+                        }
+
+                        if (baseIndex === -1) return;
+
+                        const activeLinks = [];
+                        for (const item of groupInputs) {
+                            if (item.input.link !== null) {
+                                const link = app.graph.links[item.input.link];
+                                if (link) {
+                                    if (link.target_id !== this.id) continue;
+                                    let slotNum = 1;
+                                    if (item.name !== baseName) {
+                                        const parsed = parseInt(item.name.slice(prefix.length), 10);
+                                        if (!Number.isNaN(parsed)) slotNum = parsed;
+                                    }
+                                    activeLinks.push({
+                                        slotNum,
+                                        origin_id: link.origin_id,
+                                        origin_slot: link.origin_slot,
+                                        type: link.type
+                                    });
+                                }
+                            }
+                        }
+
+                        activeLinks.sort((a, b) => a.slotNum - b.slotNum);
+                        const finalSlots = Math.min(activeLinks.length + 1, maxSlots);
+
+                        for (let i = this.inputs.length - 1; i >= 0; i--) {
+                            const n = this.inputs[i].name;
+                            if (n !== baseName && n.startsWith(prefix)) {
+                                this.removeInput(i);
+                            }
+                        }
+
+                        baseIndex = (this.inputs || []).findIndex(inp => inp.name === baseName);
+                        if (baseIndex === -1) return;
+
+                        for (let slotNum = 2; slotNum <= finalSlots; slotNum++) {
+                            const name = `${prefix}${slotNum}`;
+                            this.addInput(name, inputType);
+                            const input = this.inputs[this.inputs.length - 1];
+                            if (input) {
+                                input.label = isZh ? `${zhLabel} ${slotNum}` : `${enLabel} ${slotNum}`;
+                            }
+                            const moved = this.inputs.pop();
+                            this.inputs.splice(baseIndex + (slotNum - 1), 0, moved);
+                        }
+
+                        const nameToIndex = {};
+                        for (let i = 0; i < this.inputs.length; i++) {
+                            const n = this.inputs[i].name;
+                            if (n === baseName || n.startsWith(prefix)) nameToIndex[n] = i;
+                        }
+
+                        for (let k = 0; k < activeLinks.length && k < maxSlots; k++) {
+                            const linkInfo = activeLinks[k];
+                            const targetName = (k === 0) ? baseName : `${prefix}${k + 1}`;
+                            const targetSlotIndex = nameToIndex[targetName];
+                            if (targetSlotIndex === undefined) continue;
+                            const sourceNode = app.graph.getNodeById(linkInfo.origin_id);
+                            if (sourceNode) {
+                                sourceNode.connect(linkInfo.origin_slot, this, targetSlotIndex);
+                            }
+                        }
+                    };
+
+                    updateGroup("ref_image_", "ref_image_1", 9, "IMAGE", "参考图片", "Ref Image");
+                    updateGroup("ref_video_", "ref_video_1", 3, "VIDEO", "参考视频", "Ref Video");
+                    updateGroup("ref_audio_", "ref_audio_1", 3, "AUDIO", "参考音频", "Ref Audio");
+
+                    updateNodeHeight(this, extraHeight);
                 } catch (e) {
                     console.error("[Jimeng] Error updating dynamic inputs:", e);
                 } finally {

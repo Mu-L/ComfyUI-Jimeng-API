@@ -87,6 +87,7 @@ class JimengSeedream3(comfy_io.ComfyNode):
             node_id="JimengSeedream3",
             display_name="Jimeng Seedream 3",
             category=GLOBAL_CATEGORY,
+            is_deprecated=True,
             inputs=[
                 JimengClientType.Input("client"),
                 comfy_io.String.Input("prompt", multiline=True, default=""),

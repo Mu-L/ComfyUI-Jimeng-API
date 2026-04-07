@@ -150,7 +150,7 @@ _dependencies_ready = check_and_update_dependencies()
 if _dependencies_ready:
     from .nodes.nodes_shared import JimengAPIClient
     from .nodes.nodes_image import JimengSeedream3, JimengSeedream4, JimengSeedream5
-    from .nodes.nodes_video import JimengSeedance1, JimengSeedance1_5, JimengReferenceImage2Video, JimengVideoQueryTasks
+    from .nodes.nodes_video import JimengSeedance1, JimengSeedance1_5, JimengSeedance2, JimengReferenceImage2Video, JimengVideoQueryTasks
     from .nodes.nodes_visual import JimengVisualUnderstanding
     from .nodes.quota import JimengQuotaSettings
 
@@ -161,6 +161,7 @@ if _dependencies_ready:
         JimengSeedream5,
         JimengSeedance1,
         JimengSeedance1_5,
+        JimengSeedance2,
         JimengReferenceImage2Video,
         JimengVideoQueryTasks,
         JimengVisualUnderstanding,

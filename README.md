@@ -6,9 +6,21 @@
 
 本项目为 [ComfyUI](https://github.com/comfyanonymous/ComfyUI) 提供了火山方舟的视觉模型（即梦/豆包） API 节点。用户可以通过这些节点在 ComfyUI 中使用多种图像生成和视频生成功能。
 
-* `doubao-seedance-2.0` 模型因火山方舟推迟开放 API 接口暂无适配计划。
+* Seedance 2.0 面向企业用户开放公测，项目已支持 `Seedance 2.0` 与 `Seedance 2.0 fast` 视频生成节点，可用于文生视频、多模态参考、视频编辑与视频延长场景。
 
-* 项目目前已重构为 V3 架构，可能存在未知的 BUG。如在使用过程中遇到问题，请通过 [ISSUES](https://github.com/fkxianzhou/ComfyUI-Jimeng-API/issues) 反馈。
+## ⚠️ 模型下线与节点弃用说明
+
+火山方舟平台会随着模型迭代逐步下线旧版本模型。根据官方公告，`doubao-seedream-3-0-t2i-250415` 与 `doubao-seedance-1-0-lite-i2v-250428 / doubao-seedance-1-0-lite-t2v-250428` 已进入下线流程，平台将逐步下调配额并在到期后完成服务下线与替换。
+
+- **已标记为即将弃用**:
+  - `图像生成（Seedream 3）`（对应模型：doubao-seedream-3-0-t2i-250415）
+  - `视频生成（参考图生视频）`（对应模型：doubao-seedance-1-0-lite-i2v-250428 / doubao-seedance-1-0-lite-t2v-250428）
+- **建议使用新节点**:
+  - `图像生成（Seedream 3）` → `图像生成（Seedream 5）`
+  - `视频生成（参考图生视频）` → `视频生成（Seedance 2.0）`
+
+
+* 如在使用过程中遇到问题，请通过 [ISSUES](https://github.com/fkxianzhou/ComfyUI-Jimeng-API/issues) 反馈。
 
 * 暂不支持 ComfyUI 的 Nodes 2.0 新版 UI，如遇到显示异常：
   1.  点击左侧/顶部 ComfyUI 图标 打开菜单。
@@ -60,6 +72,7 @@
 - **视频生成**:
   - `视频生成（Seedance 1.0）`: 核心视频生成节点，支持文生视频、图生视频（首/尾帧）。
   - `视频生成（Seedance 1.5 Pro）`: 支持**音频生成**和**智能时长**的高级视频生成节点。
+  - `视频生成（Seedance 2.0）`: 支持**图片/视频/音频多模态参考**、**视频编辑/延长**与**联网搜索增强**。
   - `视频生成（参考图生视频）`: 根据 1-4 张**参考图像**生成视频。
   - `视频生成任务列表查询`: 用于查询和管理在 API 上运行的任务历史。
 - **视觉理解**:
@@ -109,9 +122,10 @@
 
 ---
 
-### `视频生成（Seedance 1.0 / 1.5 Pro）`
+### `视频生成（Seedance 1.0 / 1.5 Pro / 2.0）`
 - **1.0 特性**: 支持首/尾帧视频生成，支持非阻塞异步模式。
 - **1.5 Pro 特性**: 支持**音效生成**和**智能时长**控制。
+- **2.0 特性**: 支持最多 **9 张参考图 + 3 段参考视频 + 3 段参考音频**，可覆盖文生视频、多模态参考生视频、视频编辑、视频延长与联网搜索增强。
 
 ### `视频生成（参考图生视频）`
 支持上传 1-4 张图像作为风格或内容参考生成视频。
@@ -121,6 +135,7 @@
 
 **示例工作流**:
 ![Seedance 1 Workflow](example_workflows/Seedance%201.jpg)
+![Seedance 2 Workflow](example_workflows/Seedance%202.jpg)
 
 ---
 

@@ -52,7 +52,7 @@ async def _get_api_estimated_time_async(
     elif resolution == "720p":
         fallback_per_sec = 6
     elif resolution == "480p":
-        fallback_per_sec = 2
+        fallback_per_sec = 3
 
     fallback_time = (int(duration) * fallback_per_sec) + DEFAULT_FALLBACK_BASE
     try:
@@ -347,13 +347,28 @@ class JimengGenerationExecutor:
         if extra_api_params:
             request_kwargs.update(extra_api_params)
 
+        if "seedance-2-0" in str(model_name):
+            request_kwargs.pop("service_tier", None)
+            request_kwargs.pop("execution_expires_after", None)
+
         is_multi_content = isinstance(content, list) and len(content) > 0 and isinstance(content[0], list)
 
+        def _compact_debug_payload(value):
+            if isinstance(value, dict):
+                return {k: _compact_debug_payload(v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [_compact_debug_payload(v) for v in value]
+            if isinstance(value, str) and value.startswith("data:") and len(value) > 200:
+                return value[:120] + f"...<truncated:{len(value)}>"
+            return value
+
         create_coroutines = []
+        submitted_task_kwargs = []
         for i in range(generation_count):
             task_kwargs = request_kwargs.copy()
             if is_multi_content:
                 task_kwargs["content"] = content[i % len(content)]
+            submitted_task_kwargs.append(task_kwargs)
             
             create_coroutines.append(
                 asyncio.to_thread(
@@ -368,12 +383,28 @@ class JimengGenerationExecutor:
         creation_errors = []
         creation_error_counts = {}
 
-        for res in results:
+        for idx, res in enumerate(results):
             if isinstance(res, Exception):
                 creation_errors.append(res)
                 err_text = format_api_error(res)
                 if err_text.startswith("[JimengAI] "):
                     err_text = err_text[11:]
+
+                raw_err_text = str(res)
+                should_print_param_debug = (
+                    ("InvalidParameter" in err_text)
+                    or ("MissingParameter" in err_text)
+                    or ("InvalidParameter" in raw_err_text)
+                    or ("MissingParameter" in raw_err_text)
+                )
+
+                if should_print_param_debug:
+                    debug_req = _compact_debug_payload(submitted_task_kwargs[idx])
+                    log_msg(
+                        "debug_create_request_params",
+                        params=json.dumps(debug_req, ensure_ascii=False, default=str),
+                    )
+                    log_msg("log_raw_api_response", raw=raw_err_text)
 
                 if err_text not in creation_error_counts:
                     creation_error_counts[err_text] = {"count": 0, "raw": str(res)}

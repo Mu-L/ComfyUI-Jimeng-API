@@ -97,10 +97,10 @@
       },
       "enable_group_generation": {
         "name": "启用组图生成",
-        "tooltip": "基于输入的内容，生成的一组内容关联的图片。"
+        "tooltip": "基于输入的内容，生成的一组内容关联的图像。"
       },
       "max_images": {
-        "name": "最大图片数",
+        "name": "最大图像数",
         "tooltip": "在组图模式下生成的最大图像数量。"
       },
       "size": {
@@ -164,14 +164,14 @@
       },
       "enable_group_generation": {
         "name": "启用组图生成",
-        "tooltip": "基于输入的内容，生成的一组内容关联的图片。"
+        "tooltip": "基于输入的内容，生成的一组内容关联的图像。"
       },
       "enable_web_search": {
         "name": "启用联网搜索",
-        "tooltip": "开启后，模型会根据用户的提示词自主判断是否搜索互联网内容（如商品、天气等），提升生成图片的时效性，但也会增加一定的时延。"
+        "tooltip": "开启后，模型会根据用户的提示词自主判断是否搜索互联网内容（如商品、天气等），提升生成图像的时效性，但也会增加一定的时延。"
       },
       "max_images": {
-        "name": "最大图片数",
+        "name": "最大图像数",
         "tooltip": "在组图模式下生成的最大图像数量。"
       },
       "size": {
@@ -233,9 +233,13 @@
         "name": "提示词",
         "tooltip": "用于视频生成的文本提示词。"
       },
-      "duration": {
-        "name": "时长 (秒)",
-        "tooltip": "视频的期望时长。"
+      "enable_random_seed": {
+        "name": "使用随机种子",
+        "tooltip": "启用后将直接使用 API 服务端生成的随机种子，此时本地设置的种子数值将被忽略。"
+      },
+      "seed": {
+        "name": "种子",
+        "tooltip": "用于控制生成内容的随机性，相同的请求下，模型收到相同的seed值，会生成类似的结果，但不保证完全一致。"
       },
       "resolution": {
         "name": "分辨率",
@@ -245,17 +249,13 @@
         "name": "宽高比",
         "tooltip": "视频的宽高比。"
       },
-      "camerafixed": {
-        "name": "固定镜头",
-        "tooltip": "是否固定镜头。"
+      "duration": {
+        "name": "时长 (秒)",
+        "tooltip": "视频的期望时长。"
       },
-      "enable_random_seed": {
-        "name": "使用随机种子",
-        "tooltip": "启用后将直接使用 API 服务端生成的随机种子，此时本地设置的种子数值将被忽略。"
-      },
-      "seed": {
-        "name": "种子",
-        "tooltip": "用于控制生成内容的随机性，相同的请求下，模型收到相同的seed值，会生成类似的结果，但不保证完全一致。"
+      "enable_offline_inference": {
+        "name": "离线推理模式",
+        "tooltip": "启用后将使用 'flex' 服务等级，推理成本更低，但等待时间可能较长。"
       },
       "generation_count": {
         "name": "生成数量",
@@ -269,17 +269,13 @@
         "name": "保存尾帧",
         "tooltip": "生成数量大于1时，是否同时保存所有视频的最后一帧。"
       },
-      "timeout_seconds": {
-        "name": "任务超时阈值（秒）",
-        "tooltip": "任务提交后的过期时间（秒），默认 172800 秒（48小时）"
-      },
-      "enable_offline_inference": {
-        "name": "离线推理模式",
-        "tooltip": "启用后将使用 'flex' 服务等级，推理成本更低，但等待时间可能较长。"
-      },
       "non_blocking": {
         "name": "非阻塞模式",
         "tooltip": "启用后，任务将提交到后台执行，工作流将暂停。再次运行时会检查任务状态。"
+      },
+      "camerafixed": {
+        "name": "固定镜头",
+        "tooltip": "是否固定镜头。"
       },
       "image": {
         "name": "首帧图像",
@@ -287,7 +283,7 @@
       },
       "last_frame_image": {
         "name": "尾帧图像",
-        "tooltip": "用于图生视频的可选结束图像（需要首帧）。"
+        "tooltip": "用于图生视频的可选结束图像。"
       }
     },
     "outputs": {
@@ -321,17 +317,13 @@
         "name": "提示词",
         "tooltip": "用于视频生成的文本提示词。"
       },
-      "generate_audio": {
-        "name": "生成音频",
-        "tooltip": "开启后，模型输出的视频将包含同步音频。"
+      "enable_random_seed": {
+        "name": "使用随机种子",
+        "tooltip": "启用后将直接使用 API 服务端生成的随机种子，此时本地设置的种子数值将被忽略。"
       },
-      "auto_duration": {
-        "name": "智能时长",
-        "tooltip": "启用后，将忽略下方时长设置，由 API 自主选择合适的视频长度。"
-      },
-      "duration": {
-        "name": "时长 (秒)",
-        "tooltip": "视频的期望时长。"
+      "seed": {
+        "name": "种子",
+        "tooltip": "用于控制生成内容的随机性，相同的请求下，模型收到相同的seed值，会生成类似的结果，但不保证完全一致。"
       },
       "resolution": {
         "name": "分辨率",
@@ -341,41 +333,17 @@
         "name": "宽高比",
         "tooltip": "视频的宽高比。选择adaptive时，模型会根据用户提示词，智能选择最合适的宽高比。"
       },
-      "camerafixed": {
-        "name": "固定镜头",
-        "tooltip": "是否固定镜头。"
+      "auto_duration": {
+        "name": "智能时长",
+        "tooltip": "启用后，将忽略下方时长设置，由 API 自主选择合适的视频长度。"
       },
-      "enable_random_seed": {
-        "name": "使用随机种子",
-        "tooltip": "启用后将直接使用 API 服务端生成的随机种子，此时本地设置的种子数值将被忽略。"
+      "duration": {
+        "name": "时长 (秒)",
+        "tooltip": "视频的期望时长。"
       },
-      "seed": {
-        "name": "种子",
-        "tooltip": "用于控制生成内容的随机性，相同的请求下，模型收到相同的seed值，会生成类似的结果，但不保证完全一致。"
-      },
-      "generation_count": {
-        "name": "生成数量",
-        "tooltip": "一次性并发生成的任务数量。如果大于1，将激活批量保存功能。"
-      },
-      "filename_prefix": {
-        "name": "文件名前缀",
-        "tooltip": "生成数量大于1时，要保存文件的前缀。可以包含格式化信息，如 %date:yyyy-MM-dd% 或 %EmptyLatentImage.width%，以包含来自节点的值。"
-      },
-      "save_last_frame_batch": {
-        "name": "保存尾帧",
-        "tooltip": "生成数量大于1时，是否同时保存所有视频的最后一帧。"
-      },
-      "timeout_seconds": {
-        "name": "任务超时阈值（秒）",
-        "tooltip": "任务提交后的过期时间（秒），默认 172800 秒（48小时）"
-      },
-      "enable_offline_inference": {
-        "name": "离线推理模式",
-        "tooltip": "启用后将使用 'flex' 服务等级，推理成本更低，但等待时间可能较长。"
-      },
-      "non_blocking": {
-        "name": "非阻塞模式",
-        "tooltip": "启用后，任务将提交到后台执行，工作流将暂停。再次运行时会检查任务状态。"
+      "generate_audio": {
+        "name": "生成音频",
+        "tooltip": "开启后，模型输出的视频将包含同步音频。"
       },
       "draft_mode": {
         "name": "启用 Draft 样片模式",
@@ -389,13 +357,37 @@
         "name": "样片任务 ID",
         "tooltip": "填入样片任务 ID，以生成正式视频。填入此项时，提示词和参考图像将被忽略，但分辨率等参数生效。"
       },
+      "enable_offline_inference": {
+        "name": "离线推理模式",
+        "tooltip": "启用后将使用 'flex' 服务等级，推理成本更低，但等待时间可能较长。"
+      },
+      "generation_count": {
+        "name": "生成数量",
+        "tooltip": "一次性并发生成的任务数量。如果大于1，将激活批量保存功能。"
+      },
+      "filename_prefix": {
+        "name": "文件名前缀",
+        "tooltip": "生成数量大于1时，要保存文件的前缀。可以包含格式化信息，如 %date:yyyy-MM-dd% 或 %EmptyLatentImage.width%，以包含来自节点的值。"
+      },
+      "save_last_frame_batch": {
+        "name": "保存尾帧",
+        "tooltip": "生成数量大于1时，是否同时保存所有视频的最后一帧。"
+      },
+      "non_blocking": {
+        "name": "非阻塞模式",
+        "tooltip": "启用后，任务将提交到后台执行，工作流将暂停。再次运行时会检查任务状态。"
+      },
+      "camerafixed": {
+        "name": "固定镜头",
+        "tooltip": "是否固定镜头。"
+      },
       "image": {
         "name": "首帧图像",
         "tooltip": "用于图生视频的可选起始图像。"
       },
       "last_frame_image": {
         "name": "尾帧图像",
-        "tooltip": "用于图生视频的可选结束图像（需要首帧）。"
+        "tooltip": "用于图生视频的可选结束图像。"
       }
     },
     "outputs": {
@@ -406,6 +398,154 @@
       "1": {
         "name": "最后一帧",
         "tooltip": "生成的视频的最后一帧图像（批量生成时为按种子排序的第一个）。"
+      },
+      "2": {
+        "name": "响应",
+        "tooltip": "API 的 JSON 格式响应（批量生成时为列表）。"
+      }
+    }
+  },
+  "JimengSeedance2": {
+    "display_name": "视频生成（Seedance 2.0）",
+    "description": "使用 Seedance 2.0 系列模型生成或编辑视频，支持图像、视频、音频多模态参考。",
+    "inputs": {
+      "client": {
+        "name": "客户端",
+        "tooltip": "火山方舟 API 客户端。"
+      },
+      "model_version": {
+        "name": "模型版本",
+        "tooltip": "选择要使用的 Seedance 2.0 模型版本。"
+      },
+      "prompt": {
+        "name": "提示词",
+        "tooltip": "用于视频生成的文本提示词。"
+      },
+      "enable_random_seed": {
+        "name": "使用随机种子",
+        "tooltip": "启用后将直接使用 API 服务端生成的随机种子，此时本地设置的种子数值将被忽略。"
+      },
+      "seed": {
+        "name": "种子",
+        "tooltip": "用于控制生成内容的随机性，相同请求下使用相同 seed 往往会得到相近结果，但不保证完全一致。"
+      },
+      "resolution": {
+        "name": "分辨率",
+        "tooltip": "视频的分辨率。"
+      },
+      "aspect_ratio": {
+        "name": "宽高比",
+        "tooltip": "视频的宽高比。选择adaptive时，模型会根据用户提示词，智能选择最合适的宽高比。"
+      },
+      "auto_duration": {
+        "name": "智能时长",
+        "tooltip": "启用后，将忽略下方时长设置，由 API 自主选择合适的视频长度。"
+      },
+      "duration": {
+        "name": "时长 (秒)",
+        "tooltip": "视频的期望时长。"
+      },
+      "generate_audio": {
+        "name": "生成音频",
+        "tooltip": "开启后，模型输出的视频将包含同步音频。"
+      },
+      "enable_web_search": {
+        "name": "联网搜索",
+        "tooltip": "开启联网搜索后，模型会根据用户的提示词自主判断是否搜索互联网内容（如商品、天气等）。可提升生成视频的时效性，但也会增加一定的时延。"
+      },
+      "generation_count": {
+        "name": "生成数量",
+        "tooltip": "一次性并发生成的任务数量。如果大于1，将激活批量保存功能。"
+      },
+      "filename_prefix": {
+        "name": "文件名前缀",
+        "tooltip": "生成数量大于1时，要保存文件的前缀。可以包含格式化信息，如 %date:yyyy-MM-dd% 或 %EmptyLatentImage.width%，以包含来自节点的值。"
+      },
+      "save_last_frame_batch": {
+        "name": "保存尾帧",
+        "tooltip": "生成数量大于1时，是否同时保存所有视频的最后一帧。"
+      },
+      "non_blocking": {
+        "name": "非阻塞模式",
+        "tooltip": "启用后，任务将提交到后台执行，工作流将暂停。再次运行时会检查任务状态。"
+      },
+      "first_frame_image": {
+        "name": "首帧图像",
+        "tooltip": "用于图生视频的可选起始图像。"
+      },
+      "last_frame_image": {
+        "name": "尾帧图像",
+        "tooltip": "用于图生视频的可选结束图像。"
+      },
+      "ref_image_1": {
+        "name": "参考图像 1",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_image_2": {
+        "name": "参考图像 2",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_image_3": {
+        "name": "参考图像 3",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_image_4": {
+        "name": "参考图像 4",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_image_5": {
+        "name": "参考图像 5",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_image_6": {
+        "name": "参考图像 6",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_image_7": {
+        "name": "参考图像 7",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_image_8": {
+        "name": "参考图像 8",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_image_9": {
+        "name": "参考图像 9",
+        "tooltip": "用于多模态参考的图像。"
+      },
+      "ref_video_1": {
+        "name": "参考视频 1",
+        "tooltip": "用于多模态参考的视频。"
+      },
+      "ref_video_2": {
+        "name": "参考视频 2",
+        "tooltip": "用于多模态参考的视频。"
+      },
+      "ref_video_3": {
+        "name": "参考视频 3",
+        "tooltip": "用于多模态参考的视频。"
+      },
+      "ref_audio_1": {
+        "name": "参考音频 1",
+        "tooltip": "用于多模态参考的音频。"
+      },
+      "ref_audio_2": {
+        "name": "参考音频 2",
+        "tooltip": "用于多模态参考的音频。"
+      },
+      "ref_audio_3": {
+        "name": "参考音频 3",
+        "tooltip": "用于多模态参考的音频。"
+      }
+    },
+    "outputs": {
+      "0": {
+        "name": "视频",
+        "tooltip": "生成的视频文件（批量生成时为按种子排序的第一个）。"
+      },
+      "1": {
+        "name": "最后一帧",
+        "tooltip": "生成的视频最后一帧图像（批量生成时为按种子排序的第一个）。"
       },
       "2": {
         "name": "响应",
@@ -425,9 +565,13 @@
         "name": "提示词",
         "tooltip": "用于视频生成的文本提示词。"
       },
-      "duration": {
-        "name": "时长 (秒)",
-        "tooltip": "视频的期望时长。"
+      "enable_random_seed": {
+        "name": "使用随机种子",
+        "tooltip": "启用后将直接使用 API 服务端生成的随机种子，此时本地设置的种子数值将被忽略。"
+      },
+      "seed": {
+        "name": "种子",
+        "tooltip": "用于控制生成内容的随机性，相同的请求下，模型收到相同的seed值，会生成类似的结果，但不保证完全一致。"
       },
       "resolution": {
         "name": "分辨率",
@@ -437,13 +581,13 @@
         "name": "宽高比",
         "tooltip": "视频的宽高比。"
       },
-      "enable_random_seed": {
-        "name": "使用随机种子",
-        "tooltip": "启用后将直接使用 API 服务端生成的随机种子，此时本地设置的种子数值将被忽略。"
+      "duration": {
+        "name": "时长 (秒)",
+        "tooltip": "视频的期望时长。"
       },
-      "seed": {
-        "name": "种子",
-        "tooltip": "用于控制生成内容的随机性，相同的请求下，模型收到相同的seed值，会生成类似的结果，但不保证完全一致。"
+      "enable_offline_inference": {
+        "name": "离线推理模式",
+        "tooltip": "启用后将使用 'flex' 服务等级，推理成本更低，但等待时间可能较长。"
       },
       "generation_count": {
         "name": "生成数量",
@@ -456,14 +600,6 @@
       "save_last_frame_batch": {
         "name": "保存尾帧",
         "tooltip": "生成数量大于1时，是否同时保存所有视频的最后一帧。"
-      },
-      "timeout_seconds": {
-        "name": "任务超时阈值（秒）",
-        "tooltip": "任务提交后的过期时间（秒），默认 172800 秒（48小时）"
-      },
-      "enable_offline_inference": {
-        "name": "离线推理模式",
-        "tooltip": "启用后将使用 'flex' 服务等级，推理成本更低，但等待时间可能较长。"
       },
       "non_blocking": {
         "name": "非阻塞模式",
@@ -583,7 +719,7 @@
   },
   "JimengVisualUnderstanding": {
     "display_name": "视觉理解（Seed 2.0）",
-    "description": "使用 Seed 2.0 模型进行视觉理解对话，支持图片/视频输入和多轮对话。",
+    "description": "使用 Seed 2.0 模型进行视觉理解对话，支持图像/视频输入和多轮对话。",
     "inputs": {
       "client": {
         "name": "客户端",
@@ -602,8 +738,8 @@
         "tooltip": "用户的输入文本，描述您想了解的内容或向模型提出的问题。"
       },
       "detail": {
-        "name": "图片理解程度",
-        "tooltip": "图片理解的精细度。'low': 低精度模式，消耗 Token 较少；'high': 高精度模式，提供更详细的分析。"
+        "name": "图像理解程度",
+        "tooltip": "图像理解的精细度。'low': 低精度模式，消耗 Token 较少；'high': 高精度模式，提供更详细的分析。"
       },
       "fps": {
         "name": "视频采样帧率",
@@ -635,7 +771,7 @@
       },
       "visual_input_1": {
         "name": "视觉输入 1",
-        "tooltip": "输入模型的图片或视频文件。"
+        "tooltip": "输入模型的图像或视频文件。"
       },
       "visual_input_2": {
         "name": "视觉输入 2",

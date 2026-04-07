@@ -76,6 +76,12 @@ def get_common_video_inputs():
     获取通用的视频生成输入参数定义。
     包含随机种子、生成数量、文件前缀、超时设置等。
     """
+    return (
+        get_common_video_seed_inputs()
+        + get_common_video_runtime_inputs(include_offline=True)
+    )
+
+def get_common_video_seed_inputs():
     return [
         comfy_io.Boolean.Input(
             "enable_random_seed",
@@ -83,12 +89,21 @@ def get_common_video_inputs():
             tooltip="On=Enabled, Off=Disabled",
         ),
         comfy_io.Int.Input("seed", default=0, min=0, max=VIDEO_MAX_SEED),
+    ]
+
+def get_common_video_runtime_inputs(include_offline=True):
+    inputs = []
+    if include_offline:
+        inputs.append(comfy_io.Boolean.Input("enable_offline_inference", default=False))
+    inputs.extend(
+        [
         comfy_io.Int.Input("generation_count", default=1, min=1),
         comfy_io.String.Input("filename_prefix", default=DEFAULT_FILENAME_PREFIX),
         comfy_io.Boolean.Input("save_last_frame_batch", default=False),
-        comfy_io.Boolean.Input("enable_offline_inference", default=False),
         comfy_io.Boolean.Input("non_blocking", default=False),
-    ]
+        ]
+    )
+    return inputs
 
 def get_duration_input(default=5.0, min_val=1.2, max_val=12.0, step=0.2, is_int=False):
     """
