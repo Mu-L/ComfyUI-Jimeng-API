@@ -14,6 +14,7 @@ import torch.nn.functional as F
 import requests
 import cv2
 import asyncio
+import threading
 from volcenginesdkarkruntime import Ark
 
 from comfy_api.latest import io as comfy_io
@@ -64,9 +65,6 @@ jimeng_api_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 API_KEYS_FILE = os.path.join(jimeng_api_dir, "api_keys.json")
 FILES_UPLOAD_CACHE_FILE = os.path.join(jimeng_api_dir, "files_upload_cache.json")
 
-API_KEYS_CONFIG = []
-CURRENT_LANG = "en"
-
 JimengClientType = comfy_io.Custom("JIMENG_CLIENT")
 
 
@@ -83,12 +81,104 @@ def detect_system_language():
     return "en"
 
 
+class LocalizationState:
+    def __init__(self, default_lang="en"):
+        self._lock = threading.RLock()
+        self._lang = "en"
+        self.set_language(default_lang)
+
+    def set_language(self, lang):
+        normalized_lang = lang if lang in LOG_TRANSLATIONS else "en"
+        with self._lock:
+            self._lang = normalized_lang
+
+    def refresh_from_system(self):
+        self.set_language(detect_system_language())
+
+    def get_language(self):
+        with self._lock:
+            return self._lang
+
+    def get_mapping(self):
+        return LOG_TRANSLATIONS.get(self.get_language(), LOG_TRANSLATIONS["en"])
+
+
+LOCALIZATION_STATE = LocalizationState(detect_system_language())
+
+
+class ApiKeyStore:
+    def __init__(self, config_file):
+        self.config_file = config_file
+        self._lock = threading.RLock()
+        self._items = []
+
+    def load(self):
+        loaded_items = []
+        LOCALIZATION_STATE.refresh_from_system()
+
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, "r", encoding="utf-8") as f:
+                    keys_data = json.load(f)
+                if isinstance(keys_data, list):
+                    for item in keys_data:
+                        if "customName" in item and "apiKey" in item:
+                            loaded_items.append(item)
+        except Exception as e:
+            log_msg("api_load_error", e=e)
+
+        with self._lock:
+            self._items = loaded_items
+
+    def save(self):
+        with self._lock:
+            serializable_items = list(self._items)
+        try:
+            with open(self.config_file, "w", encoding="utf-8") as f:
+                json.dump(serializable_items, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to save API key: {e}")
+            return False
+        return True
+
+    def upsert(self, name, key):
+        with self._lock:
+            updated = False
+            for item in self._items:
+                if item["customName"] == name:
+                    item["apiKey"] = key
+                    updated = True
+                    break
+
+            if not updated:
+                self._items.append({"customName": name, "apiKey": key})
+
+        return self.save()
+
+    def get_items(self):
+        with self._lock:
+            return [dict(item) for item in self._items]
+
+    def get_key_names(self):
+        with self._lock:
+            return [item["customName"] for item in self._items]
+
+    def find_api_key(self, key_name):
+        with self._lock:
+            for item in self._items:
+                if item["customName"] == key_name:
+                    return item["apiKey"]
+        return None
+
+
+API_KEY_STORE = ApiKeyStore(API_KEYS_FILE)
+
+
 def get_text(key, **kwargs):
     """
     获取指定 key 的本地化文本。
     """
-    global CURRENT_LANG
-    mapping = LOG_TRANSLATIONS.get(CURRENT_LANG, LOG_TRANSLATIONS["en"])
+    mapping = LOCALIZATION_STATE.get_mapping()
     msg = mapping.get(key, LOG_TRANSLATIONS["en"].get(key, key))
     if kwargs:
         try:
@@ -102,8 +192,7 @@ def log_msg(key, default_msg="", **kwargs):
     """
     记录本地化日志信息。
     """
-    global CURRENT_LANG
-    mapping = LOG_TRANSLATIONS.get(CURRENT_LANG, LOG_TRANSLATIONS["en"])
+    mapping = LOCALIZATION_STATE.get_mapping()
     msg = mapping.get(key, None)
     if not msg:
         msg = LOG_TRANSLATIONS["en"].get(key, default_msg)
@@ -150,8 +239,7 @@ def format_api_error(e):
     格式化 API 错误信息。
     尝试解析错误代码并返回对应的本地化错误描述。
     """
-    global CURRENT_LANG
-    mapping = LOG_TRANSLATIONS.get(CURRENT_LANG, LOG_TRANSLATIONS["en"])
+    mapping = LOCALIZATION_STATE.get_mapping()
     error_map = mapping.get("api_errors", {})
     fallback_map = LOG_TRANSLATIONS["en"].get("api_errors", {})
 
@@ -206,47 +294,15 @@ def load_api_keys():
     """
     加载 API 密钥配置文件 (api_keys.json)。
     """
-    global API_KEYS_CONFIG, CURRENT_LANG
-    API_KEYS_CONFIG = []
-    CURRENT_LANG = detect_system_language()
-
-    if not os.path.exists(API_KEYS_FILE):
-        pass
-
-    try:
-        if os.path.exists(API_KEYS_FILE):
-            with open(API_KEYS_FILE, "r", encoding="utf-8") as f:
-                keys_data = json.load(f)
-                if isinstance(keys_data, list):
-                    for item in keys_data:
-                        if "customName" in item and "apiKey" in item:
-                            API_KEYS_CONFIG.append(item)
-    except Exception as e:
-        log_msg("api_load_error", e=e)
+    API_KEY_STORE.load()
 
 
 def save_api_key(name, key):
     """
     保存新的 API Key 到配置文件。
     """
-    global API_KEYS_CONFIG
-    
-    updated = False
-    for item in API_KEYS_CONFIG:
-        if item["customName"] == name:
-            item["apiKey"] = key
-            updated = True
-            break
-    
-    if not updated:
-        API_KEYS_CONFIG.append({"customName": name, "apiKey": key})
-    
-    try:
-        with open(API_KEYS_FILE, "w", encoding="utf-8") as f:
-            json.dump(API_KEYS_CONFIG, f, indent=2, ensure_ascii=False)
+    if API_KEY_STORE.upsert(name, key):
         logger.info(f"Saved API Key: {name}")
-    except Exception as e:
-        logger.error(f"Failed to save API key: {e}")
 
 
 def validate_api_key(api_key: str) -> bool:
@@ -270,9 +326,6 @@ def validate_api_key(api_key: str) -> bool:
     except Exception as e:
         logger.error(f"API Key validation error: {e}")
         return False
-
-
-FILES_UPLOAD_CACHE = {}
 
 
 def _normalize_expire_seconds(expire_seconds):
@@ -317,51 +370,87 @@ def _compute_file_sha256(file_path):
     return hasher.hexdigest()
 
 
-def load_files_upload_cache():
-    global FILES_UPLOAD_CACHE
-    FILES_UPLOAD_CACHE = {}
-    if not os.path.exists(FILES_UPLOAD_CACHE_FILE):
-        return
-    try:
-        with open(FILES_UPLOAD_CACHE_FILE, "r", encoding="utf-8") as f:
-            cache_data = json.load(f)
-        if not isinstance(cache_data, dict):
-            return
+class UploadCacheStore:
+    def __init__(self, cache_file):
+        self.cache_file = cache_file
+        self._lock = threading.RLock()
+        self._data = {}
+
+    def load(self):
+        loaded_data = {}
+        if os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, "r", encoding="utf-8") as f:
+                    cache_data = json.load(f)
+                if isinstance(cache_data, dict):
+                    now_ts = int(time.time())
+                    for raw_key, entry in cache_data.items():
+                        cache_key = _normalize_cache_key(raw_key)
+                        if cache_key is None or not isinstance(entry, dict):
+                            continue
+                        file_id = entry.get("file_id")
+                        expire_at = int(entry.get("expire_at", 0) or 0)
+                        if file_id and expire_at > now_ts:
+                            loaded_data[cache_key] = {
+                                "file_id": file_id,
+                                "expire_at": expire_at
+                            }
+            except Exception as e:
+                logger.error(f"Failed to load upload cache: {e}")
+        with self._lock:
+            self._data = loaded_data
+
+    def save(self):
         now_ts = int(time.time())
-        for raw_key, entry in cache_data.items():
-            cache_key = _normalize_cache_key(raw_key)
-            if cache_key is None or not isinstance(entry, dict):
-                continue
-            file_id = entry.get("file_id")
-            expire_at = int(entry.get("expire_at", 0) or 0)
-            if file_id and expire_at > now_ts:
-                FILES_UPLOAD_CACHE[cache_key] = {
-                    "file_id": file_id,
-                    "expire_at": expire_at
-                }
-    except Exception as e:
-        logger.error(f"Failed to load upload cache: {e}")
+        serializable_data = {}
+        with self._lock:
+            for raw_key, entry in self._data.items():
+                cache_key = _normalize_cache_key(raw_key)
+                if cache_key is None or not isinstance(entry, dict):
+                    continue
+                file_id = entry.get("file_id")
+                expire_at = int(entry.get("expire_at", 0) or 0)
+                if file_id and expire_at > now_ts:
+                    serializable_data[_serialize_cache_key(cache_key)] = {
+                        "file_id": file_id,
+                        "expire_at": expire_at
+                    }
+        try:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
+                json.dump(serializable_data, f, indent=2, ensure_ascii=False)
+        except Exception as e:
+            logger.error(f"Failed to save upload cache: {e}")
+
+    def get(self, cache_key):
+        with self._lock:
+            return self._data.get(cache_key)
+
+    def set(self, cache_key, entry):
+        with self._lock:
+            self._data[cache_key] = entry
+
+    def pop(self, cache_key, default=None):
+        with self._lock:
+            return self._data.pop(cache_key, default)
+
+    def contains(self, cache_key):
+        with self._lock:
+            return cache_key in self._data
+
+    def keys(self):
+        with self._lock:
+            return list(self._data.keys())
+
+
+UPLOAD_CACHE_STORE = UploadCacheStore(FILES_UPLOAD_CACHE_FILE)
+
+
+def load_files_upload_cache():
+    UPLOAD_CACHE_STORE.load()
 
 
 def save_files_upload_cache():
-    now_ts = int(time.time())
-    serializable_data = {}
-    for raw_key, entry in FILES_UPLOAD_CACHE.items():
-        cache_key = _normalize_cache_key(raw_key)
-        if cache_key is None or not isinstance(entry, dict):
-            continue
-        file_id = entry.get("file_id")
-        expire_at = int(entry.get("expire_at", 0) or 0)
-        if file_id and expire_at > now_ts:
-            serializable_data[_serialize_cache_key(cache_key)] = {
-                "file_id": file_id,
-                "expire_at": expire_at
-            }
-    try:
-        with open(FILES_UPLOAD_CACHE_FILE, "w", encoding="utf-8") as f:
-            json.dump(serializable_data, f, indent=2, ensure_ascii=False)
-    except Exception as e:
-        logger.error(f"Failed to save upload cache: {e}")
+    UPLOAD_CACHE_STORE.save()
 
 
 load_files_upload_cache()
@@ -371,12 +460,10 @@ async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800,
     """
     使用 client.ark.files.create 上传文件。
     """
-    global FILES_UPLOAD_CACHE
-    
     expire_seconds = _normalize_expire_seconds(expire_seconds)
     if fps is None:
         try:
-            file_identity = f"sha256:{_compute_file_sha256(file_path)}"
+            file_identity = f"sha256:{await asyncio.to_thread(_compute_file_sha256, file_path)}"
         except Exception:
             file_identity = file_path
     else:
@@ -386,12 +473,12 @@ async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800,
     now_ts = int(time.time())
     expire_at = now_ts + expire_seconds
 
-    cached_entry = FILES_UPLOAD_CACHE.get(cache_key)
+    cached_entry = UPLOAD_CACHE_STORE.get(cache_key)
     legacy_path_key = None
     matched_cache_key = cache_key
     if cached_entry is None and fps is None and file_identity != file_path:
         legacy_path_key = (file_path, None, expire_seconds)
-        cached_entry = FILES_UPLOAD_CACHE.get(legacy_path_key)
+        cached_entry = UPLOAD_CACHE_STORE.get(legacy_path_key)
         if cached_entry is not None:
             matched_cache_key = legacy_path_key
     if isinstance(cached_entry, dict):
@@ -407,9 +494,9 @@ async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800,
                 remote_expire_at = int(getattr(remote_file_info, "expire_at", 0) or 0)
                 if remote_status == "active" and remote_expire_at > now_ts:
                     cached_entry["expire_at"] = remote_expire_at
-                    if legacy_path_key is not None and legacy_path_key in FILES_UPLOAD_CACHE:
-                        FILES_UPLOAD_CACHE.pop(legacy_path_key, None)
-                        FILES_UPLOAD_CACHE[cache_key] = cached_entry
+                    if legacy_path_key is not None and UPLOAD_CACHE_STORE.contains(legacy_path_key):
+                        UPLOAD_CACHE_STORE.pop(legacy_path_key, None)
+                        UPLOAD_CACHE_STORE.set(cache_key, cached_entry)
                     save_files_upload_cache()
                     log_msg("visual_found_file", path=file_path)
                     if return_meta:
@@ -420,9 +507,9 @@ async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800,
                     return cached_file_id
             except Exception:
                 if cached_expire_at > now_ts:
-                    if legacy_path_key is not None and legacy_path_key in FILES_UPLOAD_CACHE:
-                        FILES_UPLOAD_CACHE.pop(legacy_path_key, None)
-                        FILES_UPLOAD_CACHE[cache_key] = cached_entry
+                    if legacy_path_key is not None and UPLOAD_CACHE_STORE.contains(legacy_path_key):
+                        UPLOAD_CACHE_STORE.pop(legacy_path_key, None)
+                        UPLOAD_CACHE_STORE.set(cache_key, cached_entry)
                         save_files_upload_cache()
                     log_msg("visual_found_file", path=file_path)
                     if return_meta:
@@ -431,17 +518,17 @@ async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800,
                             "expire_at": cached_expire_at
                         }
                     return cached_file_id
-        FILES_UPLOAD_CACHE.pop(matched_cache_key, None)
+        UPLOAD_CACHE_STORE.pop(matched_cache_key, None)
         save_files_upload_cache()
     elif cached_entry is not None:
-        FILES_UPLOAD_CACHE.pop(cache_key, None)
+        UPLOAD_CACHE_STORE.pop(cache_key, None)
         save_files_upload_cache()
 
     identity_candidates = {file_identity}
     if fps is None and file_identity != file_path:
         identity_candidates.add(file_path)
     stale_keys = []
-    for existing_key in list(FILES_UPLOAD_CACHE.keys()):
+    for existing_key in UPLOAD_CACHE_STORE.keys():
         normalized_existing_key = _normalize_cache_key(existing_key)
         if normalized_existing_key is None:
             continue
@@ -456,7 +543,7 @@ async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800,
     if stale_keys and hasattr(client.ark, "files"):
         cache_changed = False
         for stale_key in stale_keys:
-            stale_entry = FILES_UPLOAD_CACHE.get(stale_key)
+            stale_entry = UPLOAD_CACHE_STORE.get(stale_key)
             if isinstance(stale_entry, dict):
                 stale_file_id = stale_entry.get("file_id")
                 if stale_file_id:
@@ -467,7 +554,7 @@ async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800,
                         )
                     except Exception as e:
                         logger.error(f"Delete stale file failed for {stale_file_id}: {e}")
-            FILES_UPLOAD_CACHE.pop(stale_key, None)
+            UPLOAD_CACHE_STORE.pop(stale_key, None)
             cache_changed = True
         if cache_changed:
             save_files_upload_cache()
@@ -502,10 +589,10 @@ async def upload_file_to_ark(client, file_path, fps=None, expire_seconds=604800,
                     
                     await wait_for_file_active(client, file_id)
                     
-                    FILES_UPLOAD_CACHE[cache_key] = {
+                    UPLOAD_CACHE_STORE.set(cache_key, {
                         "file_id": file_id,
                         "expire_at": expire_at
-                    }
+                    })
                     save_files_upload_cache()
                     if return_meta:
                         return {
@@ -692,7 +779,7 @@ class JimengAPIClient(comfy_io.ComfyNode):
     @classmethod
     def define_schema(cls) -> comfy_io.Schema:
         load_api_keys()
-        key_names = [key["customName"] for key in API_KEYS_CONFIG]
+        key_names = API_KEY_STORE.get_key_names()
         key_names.append("Custom")
 
         return comfy_io.Schema(
@@ -727,10 +814,7 @@ class JimengAPIClient(comfy_io.ComfyNode):
                 print(get_text("info_new_key_saved", name=new_key_name.strip()))
 
         else:
-            for key_info in API_KEYS_CONFIG:
-                if key_info["customName"] == key_name:
-                    api_key = key_info["apiKey"]
-                    break
+            api_key = API_KEY_STORE.find_api_key(key_name)
 
         if not api_key:
             log_msg("api_key_not_found", key_name=key_name)

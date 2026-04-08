@@ -24,6 +24,25 @@ VIDEO_MAX_SEED = 4294967295
 VIDEO_DEFAULT_TIMEOUT = 172800
 VIDEO_MIN_TIMEOUT = 3600
 VIDEO_MAX_TIMEOUT = 259200
+IMAGE_MIN_EDGE = 300
+IMAGE_MAX_EDGE = 6000
+IMAGE_MIN_RATIO = 0.4
+IMAGE_MAX_RATIO = 2.5
+REF_IMAGE_MAX_SIZE_MB = 30.0
+REF_IMAGE_MAX_TOTAL_REQUEST_MB = 64.0
+REF_MEDIA_MIN_DURATION = 1.8
+REF_MEDIA_MAX_DURATION = 15.2
+REF_VIDEO_MIN_DURATION = REF_MEDIA_MIN_DURATION
+REF_VIDEO_MAX_DURATION = REF_MEDIA_MAX_DURATION
+REF_VIDEO_MAX_TOTAL_DURATION = REF_MEDIA_MAX_DURATION
+REF_VIDEO_MAX_SIZE_MB = 50.0
+REF_VIDEO_MIN_PIXELS = 409600
+REF_VIDEO_MAX_PIXELS = 927408
+REF_AUDIO_MIN_DURATION = REF_MEDIA_MIN_DURATION
+REF_AUDIO_MAX_DURATION = REF_MEDIA_MAX_DURATION
+REF_AUDIO_MAX_TOTAL_DURATION = REF_MEDIA_MAX_DURATION
+REF_AUDIO_MAX_SIZE_MB = 15.0
+REF_AUDIO_MAX_TOTAL_REQUEST_MB = 64.0
 DEFAULT_VISUAL_SYSTEM_PROMPT = "你叫豆包，是由字节跳动开发的AI。"
 VIDEO_FRAME_RATE = 24.0
 VIDEO_MIN_FRAMES = 29
@@ -66,8 +85,8 @@ LOG_TRANSLATIONS = {
         "batch_failed_reason": "  - {msg}: {count} 次",
         "debug_create_request_params": "创建任务请求参数: {params}",
         "log_raw_api_response": "原始 API 响应: {raw}",
-        "upload_ref_video_start": "开始上传参考视频 ({index}/{total})...",
-        "upload_ref_video_done": "参考视频上传完成 ({index}/{total})。",
+        "upload_ref_video_start": "开始上传参考视频（已完成: {done}，待上传: {pending}）...",
+        "upload_ref_video_done": "参考视频上传完成（已完成: {done}，待上传: {pending}）。",
         
         # 轮询提示
         "polling_single": "任务 {task_id}: 运行中... 已耗时 {elapsed}s / 预估 {max}s",
@@ -186,6 +205,7 @@ LOG_TRANSLATIONS = {
             "OutputTextSensitiveContentDetected": "生成的文字可能包含敏感信息，请您更换输入内容后重试。",
             "OutputImageSensitiveContentDetected": "生成的图像可能包含敏感信息，请您更换输入内容后重试。",
             "OutputVideoSensitiveContentDetected": "生成的视频可能包含敏感信息，请您更换输入内容后重试。",
+            "InputMediaMayContainRealPerson": "输入的图片或视频可能包含真人内容，请更换素材后重试。",
             "InvalidImageURL": "无法解析或处理图片，可能是 Base64 格式不正确、图片数据损坏或格式不支持。",
             "InvalidImageDetail": "image_url 中的 detail 参数值无效，只接受 'auto', 'high', 'low'。",
             "MissingParameter": "请求缺少必要参数，请查阅 API 文档。",
@@ -218,8 +238,8 @@ LOG_TRANSLATIONS = {
         "batch_failed_reason": "  - {msg}: {count} times",
         "debug_create_request_params": "Create request params: {params}",
         "log_raw_api_response": "Raw API response: {raw}",
-        "upload_ref_video_start": "Uploading reference video ({index}/{total})...",
-        "upload_ref_video_done": "Reference video upload completed ({index}/{total}).",
+        "upload_ref_video_start": "Uploading reference video (done: {done}, pending: {pending})...",
+        "upload_ref_video_done": "Reference video upload completed (done: {done}, pending: {pending}).",
         
         # Updated
         "polling_single": "Task {task_id}: Running... {elapsed}s / {max}s elapsed",
@@ -328,6 +348,7 @@ LOG_TRANSLATIONS = {
             "OutputTextSensitiveContentDetected": "Generated text contains sensitive content (400).",
             "OutputImageSensitiveContentDetected": "Generated image contains sensitive content (400).",
             "OutputVideoSensitiveContentDetected": "Generated video contains sensitive content (400).",
+            "InputMediaMayContainRealPerson": "Request failed: input image or video may contain a real person.",
             "InvalidImageURL": "Invalid Image URL (400).",
             "InvalidImageDetail": "Invalid Image Detail parameter (400).",
             "MissingParameter": "Missing Parameter (400).",
@@ -343,6 +364,8 @@ ERROR_TEXT_MATCH_RULES = {
     "output image may contain sensitive information": "OutputImageSensitiveContentDetected",
     "input text may contain sensitive information": "InputTextSensitiveContentDetected",
     "input image may contain sensitive information": "InputImageSensitiveContentDetected", 
+    "the request failed because the input video may contain real person": "InputMediaMayContainRealPerson",
+    "the request failed because the input image may contain real person": "InputMediaMayContainRealPerson",
     "output video may contain sensitive information": "OutputVideoSensitiveContentDetected",
     "generated text contains sensitive content": "OutputTextSensitiveContentDetected",
     "API key or AK/SK in the request is missing or invalid": "AuthenticationError",

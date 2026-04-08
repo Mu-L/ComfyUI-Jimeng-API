@@ -156,6 +156,75 @@ function applyBottomPadding(node) {
     return changed;
 }
 
+const AUTOGROW_LABEL_RULES = {
+    JimengSeedream4: [
+        { prefix: "image_", zhLabel: "图像", enLabel: "Image" },
+    ],
+    JimengSeedream5: [
+        { prefix: "image_", zhLabel: "图像", enLabel: "Image" },
+    ],
+    JimengSeedance2: [
+        { prefix: "ref_image_", zhLabel: "参考图片", enLabel: "Ref Image" },
+        { prefix: "ref_video_", zhLabel: "参考视频", enLabel: "Ref Video" },
+        { prefix: "ref_audio_", zhLabel: "参考音频", enLabel: "Ref Audio" },
+    ],
+};
+
+function getAutogrowLabelRules(node) {
+    if (!node || !node.comfyClass) return [];
+    return AUTOGROW_LABEL_RULES[node.comfyClass] || [];
+}
+
+function escapeRegex(text) {
+    return String(text).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function setInputDisplayText(input, text) {
+    const changed =
+        input.label !== text ||
+        input.localized_name !== text ||
+        input.display_name !== text;
+    input.label = text;
+    input.localized_name = text;
+    input.display_name = text;
+    return changed;
+}
+
+function applyAutogrowInputLabels(node) {
+    if (!node.inputs || node.inputs.length === 0) return false;
+    const rules = getAutogrowLabelRules(node);
+    if (!rules || rules.length === 0) return false;
+
+    const isZh = navigator.language.startsWith("zh");
+    let changed = false;
+
+    for (const input of node.inputs) {
+        if (!input || !input.name) continue;
+        const inputName = String(input.name);
+        for (const rule of rules) {
+            // 兼容 Autogrow 生成的命名形式
+            const pattern = new RegExp(`(?:^|\\.)${escapeRegex(rule.prefix)}(\\d+)$`);
+            const matched = inputName.match(pattern);
+            if (!matched) continue;
+            const suffixNum = parseInt(matched[1], 10);
+            if (!Number.isFinite(suffixNum)) continue;
+            const displayLabel = isZh ? rule.zhLabel : rule.enLabel;
+            const expectedLabel = `${displayLabel} ${suffixNum}`;
+            if (setInputDisplayText(input, expectedLabel)) {
+                changed = true;
+            }
+            break;
+        }
+    }
+    return changed;
+}
+
+function refreshAutogrowInputLabels(node) {
+    if (applyAutogrowInputLabels(node)) {
+        app.graph.setDirtyCanvas(true, true);
+    }
+}
+
 /**
  * 执行组件联动逻辑
  * @param {object} node - 节点实例
@@ -329,236 +398,19 @@ app.registerExtension({
             return r;
         };
 
-        // 动态控制 Seedream4/5 节点的图像输入接口
-        if (node.comfyClass === "JimengSeedream4" || node.comfyClass === "JimengSeedream5") {
-            const onConnectionsChange = node.onConnectionsChange;
-            node.onConnectionsChange = function (type, index, connected, link_info, slot) {
-                const r = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
+        const onConnectionsChange = node.onConnectionsChange;
+        node.onConnectionsChange = function (type, index, connected, link_info, slot) {
+            const r = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
+            if (!this._isConfiguring) {
+                refreshAutogrowInputLabels(this);
+            }
+            return r;
+        };
 
-                if (this._isConfiguring) return r;
-
-                if (type !== 1) return r;
-
-                if (this._isUpdatingInputs) return r;
-                this._isUpdatingInputs = true;
-
-                try {
-                    let extraHeight = 0;
-                    if (this.size && this.computeSize && !this.flags?.collapsed) {
-                        const currentMinHeight = this.computeSize()[1];
-                        const currentActualHeight = this.size[1];
-                        extraHeight = Math.max(0, currentActualHeight - currentMinHeight);
-                    }
-
-                    const prefix = "image_";
-                    const MAX_INPUTS = 14;
-
-                    const allInputs = this.inputs || [];
-                    const dynamicInputs = [];
-                    let baseInputIndex = -1;
-
-                    for (let i = 0; i < allInputs.length; i++) {
-                        const name = allInputs[i].name;
-                        if (name === 'images') {
-                            baseInputIndex = i;
-                            dynamicInputs.push({ index: i, name: name, input: allInputs[i] });
-                        } else if (name.startsWith(prefix)) {
-                            dynamicInputs.push({ index: i, name: name, input: allInputs[i] });
-                        }
-                    }
-
-                    if (baseInputIndex === -1) return r;
-
-                    const activeLinks = [];
-
-                    for (const item of dynamicInputs) {
-                        if (item.input.link !== null) {
-                            const link = app.graph.links[item.input.link];
-                            if (link) {
-                                if (link.target_id !== this.id) continue;
-                                let slotNum = 1;
-                                if (item.name !== 'images') {
-                                    const parsed = parseInt(item.name.slice(prefix.length), 10);
-                                    if (!Number.isNaN(parsed)) slotNum = parsed;
-                                }
-                                activeLinks.push({
-                                    slotNum,
-                                    origin_id: link.origin_id,
-                                    origin_slot: link.origin_slot,
-                                    type: link.type
-                                });
-                            }
-                        }
-                    }
-
-                    activeLinks.sort((a, b) => a.slotNum - b.slotNum);
-
-                    const neededSlots = activeLinks.length + 1;
-                    const finalSlots = Math.min(neededSlots, MAX_INPUTS);
-
-                    const lastDynamicIndex = dynamicInputs[dynamicInputs.length - 1].index;
-                    const firstDynamicIndex = dynamicInputs[0].index; // This is 'images'
-
-                    for (let i = lastDynamicIndex; i > firstDynamicIndex; i--) {
-                        if (this.inputs[i].name.startsWith("image_")) {
-                            this.removeInput(i);
-                        }
-                    }
-
-                    for (let slot = 2; slot <= finalSlots; slot++) {
-                        const name = `image_${slot}`;
-                        this.addInput(name, "IMAGE");
-                        const input = this.inputs[this.inputs.length - 1];
-                        if (input) {
-                            const isZh = navigator.language.startsWith("zh");
-                            input.label = isZh ? `图像 ${slot}` : `Image ${slot}`;
-                        }
-                    }
-
-                    const nameToIndex = {};
-                    for (let i = 0; i < this.inputs.length; i++) {
-                        const n = this.inputs[i].name;
-                        if (n === 'images' || n.startsWith(prefix)) nameToIndex[n] = i;
-                    }
-
-                    for (let k = 0; k < activeLinks.length; k++) {
-                        const linkInfo = activeLinks[k];
-                        const targetName = (k === 0) ? 'images' : `image_${k + 1}`;
-                        const targetSlotIndex = nameToIndex[targetName];
-                        if (targetSlotIndex === undefined) continue;
-
-                        const sourceNode = app.graph.getNodeById(linkInfo.origin_id);
-                        if (sourceNode) {
-                            sourceNode.connect(linkInfo.origin_slot, this, targetSlotIndex);
-                        }
-                    }
-
-                    updateNodeHeight(this, extraHeight);
-
-                } catch (e) {
-                    console.error("[Jimeng] Error updating dynamic inputs:", e);
-                } finally {
-                    this._isUpdatingInputs = false;
-                }
-
-                return r;
-            };
-        }
-
-        if (node.comfyClass === "JimengSeedance2") {
-            const onConnectionsChange = node.onConnectionsChange;
-            node.onConnectionsChange = function (type, index, connected, link_info, slot) {
-                const r = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
-
-                if (this._isConfiguring) return r;
-                if (type !== 1) return r;
-                if (this._isUpdatingInputs) return r;
-                this._isUpdatingInputs = true;
-
-                try {
-                    let extraHeight = 0;
-                    if (this.size && this.computeSize && !this.flags?.collapsed) {
-                        const currentMinHeight = this.computeSize()[1];
-                        const currentActualHeight = this.size[1];
-                        extraHeight = Math.max(0, currentActualHeight - currentMinHeight);
-                    }
-
-                    const isZh = navigator.language.startsWith("zh");
-
-                    const updateGroup = (prefix, baseName, maxSlots, inputType, zhLabel, enLabel) => {
-                        const allInputs = this.inputs || [];
-                        let baseIndex = -1;
-                        const groupInputs = [];
-
-                        for (let i = 0; i < allInputs.length; i++) {
-                            const name = allInputs[i].name;
-                            if (name === baseName) {
-                                baseIndex = i;
-                                groupInputs.push({ index: i, name, input: allInputs[i] });
-                            } else if (name.startsWith(prefix)) {
-                                groupInputs.push({ index: i, name, input: allInputs[i] });
-                            }
-                        }
-
-                        if (baseIndex === -1) return;
-
-                        const activeLinks = [];
-                        for (const item of groupInputs) {
-                            if (item.input.link !== null) {
-                                const link = app.graph.links[item.input.link];
-                                if (link) {
-                                    if (link.target_id !== this.id) continue;
-                                    let slotNum = 1;
-                                    if (item.name !== baseName) {
-                                        const parsed = parseInt(item.name.slice(prefix.length), 10);
-                                        if (!Number.isNaN(parsed)) slotNum = parsed;
-                                    }
-                                    activeLinks.push({
-                                        slotNum,
-                                        origin_id: link.origin_id,
-                                        origin_slot: link.origin_slot,
-                                        type: link.type
-                                    });
-                                }
-                            }
-                        }
-
-                        activeLinks.sort((a, b) => a.slotNum - b.slotNum);
-                        const finalSlots = Math.min(activeLinks.length + 1, maxSlots);
-
-                        for (let i = this.inputs.length - 1; i >= 0; i--) {
-                            const n = this.inputs[i].name;
-                            if (n !== baseName && n.startsWith(prefix)) {
-                                this.removeInput(i);
-                            }
-                        }
-
-                        baseIndex = (this.inputs || []).findIndex(inp => inp.name === baseName);
-                        if (baseIndex === -1) return;
-
-                        for (let slotNum = 2; slotNum <= finalSlots; slotNum++) {
-                            const name = `${prefix}${slotNum}`;
-                            this.addInput(name, inputType);
-                            const input = this.inputs[this.inputs.length - 1];
-                            if (input) {
-                                input.label = isZh ? `${zhLabel} ${slotNum}` : `${enLabel} ${slotNum}`;
-                            }
-                            const moved = this.inputs.pop();
-                            this.inputs.splice(baseIndex + (slotNum - 1), 0, moved);
-                        }
-
-                        const nameToIndex = {};
-                        for (let i = 0; i < this.inputs.length; i++) {
-                            const n = this.inputs[i].name;
-                            if (n === baseName || n.startsWith(prefix)) nameToIndex[n] = i;
-                        }
-
-                        for (let k = 0; k < activeLinks.length && k < maxSlots; k++) {
-                            const linkInfo = activeLinks[k];
-                            const targetName = (k === 0) ? baseName : `${prefix}${k + 1}`;
-                            const targetSlotIndex = nameToIndex[targetName];
-                            if (targetSlotIndex === undefined) continue;
-                            const sourceNode = app.graph.getNodeById(linkInfo.origin_id);
-                            if (sourceNode) {
-                                sourceNode.connect(linkInfo.origin_slot, this, targetSlotIndex);
-                            }
-                        }
-                    };
-
-                    updateGroup("ref_image_", "ref_image_1", 9, "IMAGE", "参考图片", "Ref Image");
-                    updateGroup("ref_video_", "ref_video_1", 3, "VIDEO", "参考视频", "Ref Video");
-                    updateGroup("ref_audio_", "ref_audio_1", 3, "AUDIO", "参考音频", "Ref Audio");
-
-                    updateNodeHeight(this, extraHeight);
-                } catch (e) {
-                    console.error("[Jimeng] Error updating dynamic inputs:", e);
-                } finally {
-                    this._isUpdatingInputs = false;
-                }
-
-                return r;
-            };
-        }
+        refreshAutogrowInputLabels(node);
+        setTimeout(() => refreshAutogrowInputLabels(node), 0);
+        setTimeout(() => refreshAutogrowInputLabels(node), 120);
+        setTimeout(() => refreshAutogrowInputLabels(node), 360);
 
         // 筛选需监听的组件
         const widgetsToWatch = node.widgets?.filter(w => TARGET_WIDGETS.includes(w.name));

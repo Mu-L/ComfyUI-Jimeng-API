@@ -74,6 +74,65 @@ def validate_custom_size(width, height, min_pixels, max_pixels):
     return f"{width}x{height}"
 
 
+def _get_dynamic_input_order(name):
+    match = None
+    try:
+        import re
+        match = re.search(r"(\d+)$", str(name))
+    except Exception:
+        match = None
+    if match:
+        return int(match.group(1))
+    return 999
+
+
+def _create_seedream_autogrow_input():
+    return comfy_io.Autogrow.Input(
+        "images",
+        template=comfy_io.Autogrow.TemplateNames(
+            input=comfy_io.Image.Input("image", optional=True),
+            names=[f"image_{idx}" for idx in range(1, 15)],
+            min=1,
+        ),
+    )
+
+
+def _prepare_multi_image_inputs(images=None, **kwargs):
+    input_image_tensors = []
+
+    if isinstance(images, dict):
+        sorted_items = sorted(images.items(), key=lambda item: _get_dynamic_input_order(item[0]))
+        for _, image_tensor in sorted_items:
+            if isinstance(image_tensor, torch.Tensor):
+                input_image_tensors.append(image_tensor)
+    elif isinstance(images, torch.Tensor):
+        input_image_tensors.append(images)
+
+    for key in sorted([k for k in kwargs.keys() if k.startswith("image_")], key=_get_dynamic_input_order):
+        image_tensor = kwargs[key]
+        if isinstance(image_tensor, torch.Tensor):
+            input_image_tensors.append(image_tensor)
+
+    n_input_images = 0
+    image_b64_list = []
+    for tensor in input_image_tensors:
+        batch_size = tensor.shape[0]
+        n_input_images += batch_size
+        for i in range(batch_size):
+            image_b64_list.append(_image_to_base64(tensor[i : i + 1]))
+
+    image_param = None
+    if n_input_images > 0:
+        if n_input_images == 1:
+            image_param = f"data:image/jpeg;base64,{image_b64_list[0]}"
+        else:
+            image_param = [
+                f"data:image/jpeg;base64,{image_b64}" for image_b64 in image_b64_list
+            ]
+
+    return n_input_images, image_param
+
+
 class JimengSeedream3(comfy_io.ComfyNode):
     """
     Jimeng Seedream 3 图像生成节点。
@@ -239,7 +298,7 @@ class JimengSeedream4(comfy_io.ComfyNode):
                 enable_group_generation=True,
             )
             + [
-                comfy_io.Image.Input("images", optional=True),
+                _create_seedream_autogrow_input(),
             ],
             hidden=[comfy_io.Hidden.unique_id, comfy_io.Hidden.prompt],
             outputs=[
@@ -273,27 +332,7 @@ class JimengSeedream4(comfy_io.ComfyNode):
             model_id = list(SEEDREAM_4_MODEL_MAP.values())[0]
 
         sequential_param = "auto" if enable_group_generation else "disabled"
-
-        input_image_tensors = []
-        if images is not None:
-            input_image_tensors.append(images)
-            
-        sorted_keys = sorted([k for k in kwargs.keys() if k.startswith("image_")], 
-                             key=lambda x: int(x.split("_")[-1]) if x.split("_")[-1].isdigit() else 999)
-        
-        for k in sorted_keys:
-            img = kwargs[k]
-            if isinstance(img, torch.Tensor):
-                input_image_tensors.append(img)
-
-        n_input_images = 0
-        image_b64_list = []
-        
-        for tensor in input_image_tensors:
-            batch_size = tensor.shape[0]
-            n_input_images += batch_size
-            for i in range(batch_size):
-                 image_b64_list.append(_image_to_base64(tensor[i : i + 1]))
+        n_input_images, image_param = _prepare_multi_image_inputs(images, **kwargs)
 
         if sequential_param == "auto":
             total_count = n_input_images + max_images
@@ -318,15 +357,6 @@ class JimengSeedream4(comfy_io.ComfyNode):
             )
         else:
             size_str = size.split(" ")[0]
-
-        image_param = None
-        if n_input_images > 0:
-            if n_input_images == 1:
-                image_param = f"data:image/jpeg;base64,{image_b64_list[0]}"
-            else:
-                image_param = [
-                    f"data:image/jpeg;base64,{b64}" for b64 in image_b64_list
-                ]
 
         seq_options = None
         if sequential_param == "auto":
@@ -410,7 +440,7 @@ class JimengSeedream5(comfy_io.ComfyNode):
                 enable_web_search=True,
             )
             + [
-                comfy_io.Image.Input("images", optional=True),
+                _create_seedream_autogrow_input(),
             ],
             hidden=[comfy_io.Hidden.unique_id, comfy_io.Hidden.prompt],
             outputs=[
@@ -445,27 +475,7 @@ class JimengSeedream5(comfy_io.ComfyNode):
             model_id = list(SEEDREAM_5_MODEL_MAP.values())[0]
 
         sequential_param = "auto" if enable_group_generation else "disabled"
-
-        input_image_tensors = []
-        if images is not None:
-            input_image_tensors.append(images)
-            
-        sorted_keys = sorted([k for k in kwargs.keys() if k.startswith("image_")], 
-                             key=lambda x: int(x.split("_")[-1]) if x.split("_")[-1].isdigit() else 999)
-        
-        for k in sorted_keys:
-            img = kwargs[k]
-            if isinstance(img, torch.Tensor):
-                input_image_tensors.append(img)
-
-        n_input_images = 0
-        image_b64_list = []
-        
-        for tensor in input_image_tensors:
-            batch_size = tensor.shape[0]
-            n_input_images += batch_size
-            for i in range(batch_size):
-                 image_b64_list.append(_image_to_base64(tensor[i : i + 1]))
+        n_input_images, image_param = _prepare_multi_image_inputs(images, **kwargs)
 
         if sequential_param == "auto":
             total_count = n_input_images + max_images
@@ -487,15 +497,6 @@ class JimengSeedream5(comfy_io.ComfyNode):
             )
         else:
             size_str = size.split(" ")[0]
-
-        image_param = None
-        if n_input_images > 0:
-            if n_input_images == 1:
-                image_param = f"data:image/jpeg;base64,{image_b64_list[0]}"
-            else:
-                image_param = [
-                    f"data:image/jpeg;base64,{b64}" for b64 in image_b64_list
-                ]
 
         seq_options = None
         if sequential_param == "auto":

@@ -10,6 +10,7 @@ import logging
 import base64
 import io
 import wave
+import hashlib
 from urllib.parse import urlparse
 
 import folder_paths
@@ -69,6 +70,9 @@ logging.getLogger("httpx").setLevel(logging.ERROR)
 
 NON_BLOCKING_TASK_CACHE = {}
 LAST_SEEDANCE_1_5_DRAFT_TASK_ID = {}
+COMFY_VIDEO_UPLOAD_CACHE = {}
+COMFY_VIDEO_UPLOAD_CACHE_TTL_SECONDS = 86400
+COMFY_VIDEO_UPLOAD_CACHE_MAX_ENTRIES = 256
 
 
 def _raise_if_text_params(prompt: str, text_params: list[str]) -> None:
@@ -77,27 +81,73 @@ def _raise_if_text_params(prompt: str, text_params: list[str]) -> None:
             raise JimengException(get_text("popup_param_not_allowed").format(param=i))
 
 
-from .constants import VIDEO_MAX_SEED, VIDEO_DEFAULT_TIMEOUT
+def _get_dynamic_input_order(name: str) -> int:
+    parts = str(name).rsplit("_", 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return int(parts[1])
+    return 999
 
-IMAGE_MIN_EDGE = 300
-IMAGE_MAX_EDGE = 6000
-IMAGE_MIN_RATIO = 0.4
-IMAGE_MAX_RATIO = 2.5
-REF_IMAGE_MAX_SIZE_MB = 30.0
-REF_IMAGE_MAX_TOTAL_REQUEST_MB = 64.0
 
-REF_VIDEO_MIN_DURATION = 2.0
-REF_VIDEO_MAX_DURATION = 15.0
-REF_VIDEO_MAX_TOTAL_DURATION = 15.0
-REF_VIDEO_MAX_SIZE_MB = 50.0
-REF_VIDEO_MIN_PIXELS = 409600
-REF_VIDEO_MAX_PIXELS = 927408
+def _create_autogrow_input(name, input_template, prefix, min_slots, max_slots):
+    return comfy_io.Autogrow.Input(
+        name,
+        template=comfy_io.Autogrow.TemplatePrefix(
+            input=input_template,
+            prefix=prefix,
+            min=min_slots,
+            max=max_slots,
+        ),
+    )
 
-REF_AUDIO_MIN_DURATION = 2.0
-REF_AUDIO_MAX_DURATION = 15.0
-REF_AUDIO_MAX_TOTAL_DURATION = 15.0
-REF_AUDIO_MAX_SIZE_MB = 15.0
-REF_AUDIO_MAX_TOTAL_REQUEST_MB = 64.0
+
+def _create_named_autogrow_input(name, input_template, names, min_slots):
+    return comfy_io.Autogrow.Input(
+        name,
+        template=comfy_io.Autogrow.TemplateNames(
+            input=input_template,
+            names=names,
+            min=min_slots,
+        ),
+    )
+
+
+def _collect_dynamic_inputs(values=None, kwargs=None, prefix=None):
+    collected = []
+
+    if isinstance(values, dict):
+        sorted_items = sorted(values.items(), key=lambda item: _get_dynamic_input_order(item[0]))
+        collected.extend([value for _, value in sorted_items])
+    elif values is not None:
+        collected.append(values)
+
+    if kwargs and prefix:
+        sorted_keys = sorted([key for key in kwargs.keys() if key.startswith(prefix)], key=_get_dynamic_input_order)
+        collected.extend([kwargs[key] for key in sorted_keys])
+
+    return [value for value in collected if value is not None]
+
+
+from .constants import (
+    VIDEO_MAX_SEED,
+    VIDEO_DEFAULT_TIMEOUT,
+    IMAGE_MIN_EDGE,
+    IMAGE_MAX_EDGE,
+    IMAGE_MIN_RATIO,
+    IMAGE_MAX_RATIO,
+    REF_IMAGE_MAX_SIZE_MB,
+    REF_IMAGE_MAX_TOTAL_REQUEST_MB,
+    REF_VIDEO_MIN_DURATION,
+    REF_VIDEO_MAX_DURATION,
+    REF_VIDEO_MAX_TOTAL_DURATION,
+    REF_VIDEO_MAX_SIZE_MB,
+    REF_VIDEO_MIN_PIXELS,
+    REF_VIDEO_MAX_PIXELS,
+    REF_AUDIO_MIN_DURATION,
+    REF_AUDIO_MAX_DURATION,
+    REF_AUDIO_MAX_TOTAL_DURATION,
+    REF_AUDIO_MAX_SIZE_MB,
+    REF_AUDIO_MAX_TOTAL_REQUEST_MB,
+)
 
 class JimengVideoBase:
     """
@@ -212,12 +262,139 @@ class JimengVideoBase:
             return len(stream_source.getvalue())
         return 0
 
+    def _build_comfy_video_upload_cache_key(self, video):
+        try:
+            stream_source = video.get_stream_source()
+        except Exception:
+            return None
+
+        if isinstance(stream_source, str):
+            path = os.path.abspath(stream_source)
+            if not os.path.exists(path):
+                return None
+            st = os.stat(path)
+            return f"path:{path}|{int(st.st_size)}|{int(st.st_mtime_ns)}"
+
+        def _hash_buffer(size, reader):
+            hasher = hashlib.sha256()
+            sample_size = min(size, 1024 * 1024)
+            head = reader(0, sample_size)
+            hasher.update(head)
+            if size > sample_size:
+                tail = reader(size - sample_size, sample_size)
+                hasher.update(tail)
+            hasher.update(str(int(size)).encode("utf-8"))
+            return hasher.hexdigest()
+
+        if hasattr(stream_source, "getbuffer"):
+            buffer_view = stream_source.getbuffer()
+            size = int(buffer_view.nbytes)
+            digest = _hash_buffer(
+                size,
+                lambda start, length: bytes(buffer_view[start : start + length]),
+            )
+            return f"buffer:{size}|{digest}"
+
+        if hasattr(stream_source, "getvalue"):
+            raw = stream_source.getvalue()
+            size = len(raw)
+            digest = _hash_buffer(size, lambda start, length: raw[start : start + length])
+            return f"bytes:{size}|{digest}"
+
+        return None
+
+    def _prune_comfy_video_upload_cache(self):
+        now_ts = time.time()
+        expired_keys = [
+            key
+            for key, entry in COMFY_VIDEO_UPLOAD_CACHE.items()
+            if not isinstance(entry, dict)
+            or not entry.get("url")
+            or float(entry.get("expire_at", 0.0) or 0.0) <= now_ts
+        ]
+        for key in expired_keys:
+            COMFY_VIDEO_UPLOAD_CACHE.pop(key, None)
+
+        if len(COMFY_VIDEO_UPLOAD_CACHE) <= COMFY_VIDEO_UPLOAD_CACHE_MAX_ENTRIES:
+            return
+
+        sorted_items = sorted(
+            COMFY_VIDEO_UPLOAD_CACHE.items(),
+            key=lambda kv: float(kv[1].get("saved_at", 0.0) or 0.0),
+        )
+        remove_count = len(COMFY_VIDEO_UPLOAD_CACHE) - COMFY_VIDEO_UPLOAD_CACHE_MAX_ENTRIES
+        for key, _ in sorted_items[:remove_count]:
+            COMFY_VIDEO_UPLOAD_CACHE.pop(key, None)
+
+    def _get_cached_comfy_video_url(self, cache_key):
+        if not cache_key:
+            return None
+        self._prune_comfy_video_upload_cache()
+        entry = COMFY_VIDEO_UPLOAD_CACHE.get(cache_key)
+        if not isinstance(entry, dict):
+            return None
+        return (entry.get("url") or "").strip() or None
+
+    def _save_cached_comfy_video_url(self, cache_key, video_url):
+        if not cache_key:
+            return
+        normalized_url = (video_url or "").strip()
+        if not normalized_url:
+            return
+        now_ts = time.time()
+        COMFY_VIDEO_UPLOAD_CACHE[cache_key] = {
+            "url": normalized_url,
+            "saved_at": now_ts,
+            "expire_at": now_ts + COMFY_VIDEO_UPLOAD_CACHE_TTL_SECONDS,
+        }
+        self._prune_comfy_video_upload_cache()
+
+    def _get_video_duration_seconds(self, video, stream_source):
+        duration_fallback = None
+        try:
+            duration_fallback = float(video.get_duration())
+        except Exception:
+            duration_fallback = None
+
+        def _safe_numeric_from_video(method_name):
+            getter = getattr(video, method_name, None)
+            if not callable(getter):
+                return None
+            try:
+                val = float(getter())
+                if val > 0:
+                    return val
+            except Exception:
+                return None
+            return None
+
+        fps = _safe_numeric_from_video("get_fps") or _safe_numeric_from_video("get_frame_rate")
+        frame_count = _safe_numeric_from_video("get_frame_count")
+        if fps and frame_count:
+            return frame_count / fps
+
+        if isinstance(stream_source, str) and os.path.exists(stream_source):
+            cap = cv2.VideoCapture(stream_source)
+            try:
+                if cap.isOpened():
+                    cap_fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+                    cap_frames = float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
+                    if cap_fps > 0 and cap_frames > 0:
+                        return cap_frames / cap_fps
+            finally:
+                cap.release()
+
+        if duration_fallback is not None and duration_fallback > 0:
+            return duration_fallback
+
+        raise JimengException(get_text("popup_ref_video_invalid"))
+
     def _validate_single_reference_video(self, video):
         try:
             container_format = str(video.get_container_format() or "").lower()
             width, height = video.get_dimensions()
-            duration = float(video.get_duration())
             stream_source = video.get_stream_source()
+            duration = self._get_video_duration_seconds(video, stream_source)
             size_bytes = self._get_video_stream_size_bytes(stream_source)
         except Exception as e:
             raise JimengException(get_text("popup_ref_video_invalid").format(msg=str(e)))
@@ -1050,9 +1227,24 @@ class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
             + [
                 comfy_io.Image.Input("first_frame_image", optional=True),
                 comfy_io.Image.Input("last_frame_image", optional=True),
-                comfy_io.Image.Input("ref_image_1", optional=True),
-                comfy_io.Video.Input("ref_video_1", optional=True),
-                comfy_io.Audio.Input("ref_audio_1", optional=True),
+                _create_named_autogrow_input(
+                    "ref_images",
+                    comfy_io.Image.Input("ref_image", optional=True),
+                    [f"ref_image_{idx}" for idx in range(1, 10)],
+                    1,
+                ),
+                _create_named_autogrow_input(
+                    "ref_videos",
+                    comfy_io.Video.Input("ref_video", optional=True),
+                    [f"ref_video_{idx}" for idx in range(1, 4)],
+                    1,
+                ),
+                _create_named_autogrow_input(
+                    "ref_audios",
+                    comfy_io.Audio.Input("ref_audio", optional=True),
+                    [f"ref_audio_{idx}" for idx in range(1, 4)],
+                    1,
+                ),
             ],
             hidden=[
                 comfy_io.Hidden.auth_token_comfy_org,
@@ -1087,21 +1279,10 @@ class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
         non_blocking,
         first_frame_image=None,
         last_frame_image=None,
-        ref_image_1=None,
-        ref_image_2=None,
-        ref_image_3=None,
-        ref_image_4=None,
-        ref_image_5=None,
-        ref_image_6=None,
-        ref_image_7=None,
-        ref_image_8=None,
-        ref_image_9=None,
-        ref_video_1=None,
-        ref_video_2=None,
-        ref_video_3=None,
-        ref_audio_1=None,
-        ref_audio_2=None,
-        ref_audio_3=None,
+        ref_images=None,
+        ref_videos=None,
+        ref_audios=None,
+        **kwargs,
     ) -> comfy_io.NodeOutput:
         node_id = cls.hidden.unique_id
 
@@ -1110,20 +1291,11 @@ class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
 
         content = []
         total_image_request_bytes = 0
+        ref_images = _collect_dynamic_inputs(ref_images, kwargs, "ref_image_")
+        ref_videos = _collect_dynamic_inputs(ref_videos, kwargs, "ref_video_")
+        ref_audios = _collect_dynamic_inputs(ref_audios, kwargs, "ref_audio_")
 
-        for img in [
-            first_frame_image,
-            last_frame_image,
-            ref_image_1,
-            ref_image_2,
-            ref_image_3,
-            ref_image_4,
-            ref_image_5,
-            ref_image_6,
-            ref_image_7,
-            ref_image_8,
-            ref_image_9,
-        ]:
+        for img in [first_frame_image, last_frame_image] + ref_images:
             helper._validate_reference_image_constraints(img)
 
         total_image_request_bytes += helper._append_image_content(
@@ -1136,41 +1308,14 @@ class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
                 content, last_frame_image, "last_frame"
             )
 
-        has_any_reference_inputs = any(
-            img is not None
-            for img in [
-                ref_image_1,
-                ref_image_2,
-                ref_image_3,
-                ref_image_4,
-                ref_image_5,
-                ref_image_6,
-                ref_image_7,
-                ref_image_8,
-                ref_image_9,
-            ]
-        ) or any(v is not None for v in [ref_video_1, ref_video_2, ref_video_3]) or any(
-            audio is not None for audio in [ref_audio_1, ref_audio_2, ref_audio_3]
-        )
+        has_any_reference_inputs = bool(ref_images or ref_videos or ref_audios)
 
         if (first_frame_image is not None or last_frame_image is not None) and has_any_reference_inputs:
             raise JimengException(get_text("popup_first_last_conflict_with_refs"))
 
-        helper._validate_reference_videos_constraints(
-            [ref_video_1, ref_video_2, ref_video_3],
-        )
+        helper._validate_reference_videos_constraints(ref_videos)
 
-        for img in [
-            ref_image_1,
-            ref_image_2,
-            ref_image_3,
-            ref_image_4,
-            ref_image_5,
-            ref_image_6,
-            ref_image_7,
-            ref_image_8,
-            ref_image_9,
-        ]:
+        for img in ref_images:
             total_image_request_bytes += helper._append_image_content(
                 content, img, "reference_image"
             )
@@ -1183,35 +1328,39 @@ class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
                 )
             )
 
-        uploaded_video_urls: list[str | None] = [None, None, None]
-        ref_videos = [ref_video_1, ref_video_2, ref_video_3]
-        if any(v is not None for v in ref_videos):
+        uploaded_video_urls = []
+        if ref_videos:
             try:
                 from comfy_api_nodes.util import upload_video_to_comfyapi
             except Exception as e:
                 raise JimengException(get_text("popup_req_failed").format(msg=str(e)))
             for idx, v in enumerate(ref_videos):
-                if v is None:
+                cache_key = helper._build_comfy_video_upload_cache_key(v)
+                cached_video_url = helper._get_cached_comfy_video_url(cache_key)
+                if cached_video_url:
+                    uploaded_video_urls.append(cached_video_url)
                     continue
-                log_msg("upload_ref_video_start", index=idx + 1, total=3)
-                uploaded_video_urls[idx] = await upload_video_to_comfyapi(
+                done_before = len(uploaded_video_urls)
+                pending_before = max(0, len(ref_videos) - done_before)
+                log_msg("upload_ref_video_start", done=done_before, pending=pending_before)
+                uploaded_video_url = await upload_video_to_comfyapi(
                     cls,
                     v,
                     wait_label=None,
                 )
-                log_msg("upload_ref_video_done", index=idx + 1, total=3)
+                helper._save_cached_comfy_video_url(cache_key, uploaded_video_url)
+                uploaded_video_urls.append(uploaded_video_url)
+                done_after = len(uploaded_video_urls)
+                pending_after = max(0, len(ref_videos) - done_after)
+                log_msg("upload_ref_video_done", done=done_after, pending=pending_after)
 
-        final_video_urls = [
-            (uploaded_video_urls[0] or "").strip(),
-            (uploaded_video_urls[1] or "").strip(),
-            (uploaded_video_urls[2] or "").strip(),
-        ]
+        final_video_urls = [(uploaded_video_url or "").strip() for uploaded_video_url in uploaded_video_urls]
         for video_url in final_video_urls:
             helper._append_media_url_content(content, video_url, "video_url", "reference_video")
 
         total_audio_duration = 0.0
         total_audio_request_bytes = 0
-        for audio in [ref_audio_1, ref_audio_2, ref_audio_3]:
+        for audio in ref_audios:
             appended = helper._append_audio_content(content, audio, "reference_audio")
             if appended is None:
                 continue
@@ -1236,29 +1385,13 @@ class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
             )
 
         has_image_reference = any(
-            img is not None
-            for img in [
-                first_frame_image,
-                last_frame_image,
-                ref_image_1,
-                ref_image_2,
-                ref_image_3,
-                ref_image_4,
-                ref_image_5,
-                ref_image_6,
-                ref_image_7,
-                ref_image_8,
-                ref_image_9,
-            ]
-        )
+            img is not None for img in [first_frame_image, last_frame_image]
+        ) or bool(ref_images)
         has_video_reference = any(
             (url or "").strip()
             for url in final_video_urls
         )
-        has_audio_reference = any(
-            audio is not None
-            for audio in [ref_audio_1, ref_audio_2, ref_audio_3]
-        )
+        has_audio_reference = bool(ref_audios)
         prompt = (prompt or "").strip()
 
         if not prompt and not content:
