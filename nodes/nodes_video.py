@@ -1339,6 +1339,7 @@ class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
                 cached_video_url = helper._get_cached_comfy_video_url(cache_key)
                 if cached_video_url:
                     uploaded_video_urls.append(cached_video_url)
+                    log_msg("upload_ref_video_cache_hit")
                     continue
                 done_before = len(uploaded_video_urls)
                 pending_before = max(0, len(ref_videos) - done_before)
@@ -1350,9 +1351,7 @@ class JimengSeedance2(JimengVideoBase, comfy_io.ComfyNode):
                 )
                 helper._save_cached_comfy_video_url(cache_key, uploaded_video_url)
                 uploaded_video_urls.append(uploaded_video_url)
-                done_after = len(uploaded_video_urls)
-                pending_after = max(0, len(ref_videos) - done_after)
-                log_msg("upload_ref_video_done", done=done_after, pending=pending_after)
+                log_msg("upload_ref_video_done")
 
         final_video_urls = [(uploaded_video_url or "").strip() for uploaded_video_url in uploaded_video_urls]
         for video_url in final_video_urls:

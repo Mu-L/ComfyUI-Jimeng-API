@@ -86,7 +86,8 @@ LOG_TRANSLATIONS = {
         "debug_create_request_params": "创建任务请求参数: {params}",
         "log_raw_api_response": "原始 API 响应: {raw}",
         "upload_ref_video_start": "开始上传参考视频（已完成: {done}，待上传: {pending}）...",
-        "upload_ref_video_done": "参考视频上传完成（已完成: {done}，待上传: {pending}）。",
+        "upload_ref_video_done": "参考视频上传完成。",
+        "upload_ref_video_cache_hit": "命中参考视频缓存，复用已上传结果。",
         
         # 轮询提示
         "polling_single": "任务 {task_id}: 运行中... 已耗时 {elapsed}s / 预估 {max}s",
@@ -239,7 +240,8 @@ LOG_TRANSLATIONS = {
         "debug_create_request_params": "Create request params: {params}",
         "log_raw_api_response": "Raw API response: {raw}",
         "upload_ref_video_start": "Uploading reference video (done: {done}, pending: {pending})...",
-        "upload_ref_video_done": "Reference video upload completed (done: {done}, pending: {pending}).",
+        "upload_ref_video_done": "Reference video upload completed.",
+        "upload_ref_video_cache_hit": "Reference video cache hit; reused uploaded result.",
         
         # Updated
         "polling_single": "Task {task_id}: Running... {elapsed}s / {max}s elapsed",
