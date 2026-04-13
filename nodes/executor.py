@@ -191,6 +191,16 @@ class JimengGenerationExecutor:
             raw_api_response=raw_api_response,
         )
 
+    def _should_skip_failure_log_before_raise(self, successful_tasks, failed_tasks_info):
+        """
+        单个最终失败会继续抛给前端弹窗，避免同一条信息再打印一次控制台日志。
+        """
+        return (
+            (not self.ignore_errors)
+            and (not successful_tasks)
+            and len(failed_tasks_info) == 1
+        )
+
     def _create_failure_json(self, error_message, task_id=None):
         """
         创建并抛出失败异常信息。
@@ -302,15 +312,21 @@ class JimengGenerationExecutor:
                     else:
                         pending_tasks.append(res)
 
-                for tid, error_msg, raw_api_response in failed_tasks_info:
-                    self._log_batch_task_failure(error_msg, tid, raw_api_response)
-
                 if pending_tasks:
+                    for tid, error_msg, raw_api_response in failed_tasks_info:
+                        self._log_batch_task_failure(error_msg, tid, raw_api_response)
                     self._create_pending_json(
                         pending_tasks[0].status, pending_tasks[0].id, len(pending_tasks)
                     )
                 else:
                     del non_blocking_cache_dict[node_id]
+                    if not self._should_skip_failure_log_before_raise(
+                        successful_tasks, failed_tasks_info
+                    ):
+                        for tid, error_msg, raw_api_response in failed_tasks_info:
+                            self._log_batch_task_failure(
+                                error_msg, tid, raw_api_response
+                            )
                     if not successful_tasks:
                         if failed_tasks_info:
                             first_tid, first_msg, _ = failed_tasks_info[0]
@@ -721,8 +737,11 @@ class JimengGenerationExecutor:
                     "progress", {"value": 0, "max": 100, "node": node_id}
                 )
 
-        for tid, error_msg, raw_api_response in failed_tasks_info:
-            self._log_batch_task_failure(error_msg, tid, raw_api_response)
+        if not self._should_skip_failure_log_before_raise(
+            successful_tasks, failed_tasks_info
+        ):
+            for tid, error_msg, raw_api_response in failed_tasks_info:
+                self._log_batch_task_failure(error_msg, tid, raw_api_response)
 
         if generation_count == 1:
             if successful_tasks:
