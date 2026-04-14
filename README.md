@@ -92,7 +92,7 @@
 
 - **特性**: 当达到限额时自动停止任务并抛出提示，防止额度超支。
 - **示例工作流**:
-  !\[Quota Settings Workflow]\(example\_workflows/QuotaSettings.jpg null)
+  ![Quota Settings Workflow](./example_workflows/QuotaSettings.jpg)
 
 ***
 
@@ -101,7 +101,7 @@
 - **模式**: 不连接 `输入图像` 为文生图，连接则为图生图。
 
 **示例工作流**:
-!\[Seedream 3 Workflow]\(example\_workflows/Seedream%203.jpg null)
+![Seedream 3 Workflow](./example_workflows/Seedream%203.jpg)
 
 ***
 
@@ -113,7 +113,7 @@
 - **启用组图生成**: 开启后可一次性生成多张内容关联的图片。
 
 **示例工作流**:
-!\[Seedream 4 Workflow]\(example\_workflows/Seedream%204.jpg null)
+![Seedream 4 Workflow](./example_workflows/Seedream%204.jpg)
 
 ***
 
@@ -126,7 +126,7 @@
 - **联网搜索**: 开启后模型可自主搜索互联网内容（如实时信息、商品等）辅助生成。
 
 **示例工作流**:
-!\[Seedream 5 Workflow]\(example\_workflows/Seedream%205.jpg null)
+![Seedream 5 Workflow](./example_workflows/Seedream%205.jpg)
 
 ***
 
@@ -145,8 +145,8 @@
 支持按状态、模型版本或任务 ID 过滤查询任务历史。
 
 **示例工作流**:
-!\[Seedance 1 Workflow]\(example\_workflows/Seedance%201.jpg null)
-!\[Seedance 2 Workflow]\(example\_workflows/Seedance%202.jpg null)
+![Seedance 1 Workflow](./example_workflows/Seedance%201.jpg)
+![Seedance 2 Workflow](./example_workflows/Seedance%202.jpg)
 
 ***
 
@@ -159,7 +159,7 @@
 - **深度思考**: 支持开启深度思考模式，提升复杂问题的推理能力。
 
 **示例工作流**:
-!\[Visual Understanding Workflow]\(example\_workflows/VisualUnderstanding.jpg null)
+![Visual Understanding Workflow](./example_workflows/VisualUnderstanding.jpg)
 
 ## 📓 示例工作流
 
