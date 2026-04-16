@@ -62,10 +62,6 @@
       "watermark": {
         "name": "水印",
         "tooltip": "是否在生成的图像上添加水印。"
-      },
-      "image": {
-        "name": "图像",
-        "tooltip": "用于图生图的可选图像。"
       }
     },
     "outputs": {

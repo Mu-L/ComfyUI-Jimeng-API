@@ -136,7 +136,7 @@ def _prepare_multi_image_inputs(images=None, **kwargs):
 class JimengSeedream3(comfy_io.ComfyNode):
     """
     Jimeng Seedream 3 图像生成节点。
-    支持文生图和图生图。
+    支持文生图。
     """
     RECOMMENDED_SIZES = RECOMMENDED_SIZES_V3
 
@@ -153,11 +153,7 @@ class JimengSeedream3(comfy_io.ComfyNode):
                 comfy_io.Float.Input(
                     "guidance_scale", default=5.0, min=1.0, max=10.0, step=0.1
                 ),
-            ]
-            + get_image_generation_inputs(cls.RECOMMENDED_SIZES)
-            + [
-                comfy_io.Image.Input("image", optional=True),
-            ],
+            ] + get_image_generation_inputs(cls.RECOMMENDED_SIZES),
             hidden=[comfy_io.Hidden.unique_id, comfy_io.Hidden.prompt],
             outputs=[
                 comfy_io.Image.Output(display_name="image"),
@@ -177,7 +173,6 @@ class JimengSeedream3(comfy_io.ComfyNode):
         generation_count,
         watermark,
         guidance_scale,
-        image=None,
     ) -> comfy_io.NodeOutput:
         node_id = cls.hidden.unique_id
         ark_client = client.ark
@@ -192,13 +187,7 @@ class JimengSeedream3(comfy_io.ComfyNode):
         else:
             size_param = size.split(" ")[0]
 
-        image_param = None
-        if image is None:
-            model_id = SEEDREAM_3_MODELS["t2i"]
-        else:
-            model_id = SEEDREAM_3_MODELS["i2i"]
-            image_param = f"data:image/jpeg;base64,{_image_to_base64(image)}"
-            size_param = "adaptive"
+        model_id = SEEDREAM_3_MODELS["t2i"]
 
         client.check_quota(model_id, generation_count)
 
@@ -218,8 +207,6 @@ class JimengSeedream3(comfy_io.ComfyNode):
                     "seed": current_seed,
                     "guidance_scale": guidance_scale,
                 }
-                if image_param:
-                    kwargs["image"] = image_param
 
                 return ark_client.images.generate(**kwargs)
 

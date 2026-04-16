@@ -14,7 +14,6 @@ SEEDREAM_5_MODEL_MAP = {
 # Seedream 3 模型 ID
 SEEDREAM_3_MODELS = {
     "t2i": "doubao-seedream-3-0-t2i-250415",
-    "i2i": "doubao-seededit-3-0-i2i-250628",
 }
 
 # 视频模型映射

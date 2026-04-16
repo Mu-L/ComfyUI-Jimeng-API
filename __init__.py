@@ -183,6 +183,12 @@ async def comfy_entrypoint() -> ComfyExtension:
     """
     return JimengExtension()
 
+try:
+    from .docs_generator import sync_web_docs_from_node_defs
+    sync_web_docs_from_node_defs()
+except Exception:
+    pass
+
 
 WEB_DIRECTORY = "./web"
 __all__ = ["WEB_DIRECTORY"]

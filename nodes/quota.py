@@ -131,7 +131,7 @@ class JimengQuotaSettings(comfy_io.ComfyNode):
     用于设置图像和视频生成的配额限制。
     """
     
-    IMAGE_MODELS = ["None"] + list(SEEDREAM_5_MODEL_MAP.keys()) + list(SEEDREAM_4_MODEL_MAP.keys()) + ["doubao-seedream-3.0-t2i", "doubao-seedream-3.0-i2i"]
+    IMAGE_MODELS = ["None"] + list(SEEDREAM_5_MODEL_MAP.keys()) + list(SEEDREAM_4_MODEL_MAP.keys()) + ["doubao-seedream-3.0-t2i"]
     VIDEO_MODELS = ["None"] + list(VIDEO_MODEL_MAP.keys())
 
     @classmethod
@@ -174,8 +174,6 @@ class JimengQuotaSettings(comfy_io.ComfyNode):
             
             if image_model == "doubao-seedream-3.0-t2i":
                 real_image_model = SEEDREAM_3_MODELS["t2i"]
-            elif image_model == "doubao-seedream-3.0-i2i":
-                real_image_model = SEEDREAM_3_MODELS["i2i"]
                 
             manager.set_quota(api_key, real_image_model, image_limit, "image")
             
