@@ -101,9 +101,6 @@
 - **模式**: 文生图（Doubao-SeedEdit 3.0 图像编辑模型已下线）。
 - **迁移建议**: 如需图生图/参考图输入，请使用 `图像生成（Seedream 4）` 或 `图像生成（Seedream 5）`。
 
-**示例工作流**:
-![Seedream 3 Workflow](./example_workflows/Seedream%203.jpg)
-
 ***
 
 ### `图像生成（Seedream 4）`
