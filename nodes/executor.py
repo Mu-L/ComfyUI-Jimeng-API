@@ -33,22 +33,57 @@ OUTLIER_STD_DEV_FACTOR = 2.0
 RECENT_TASK_COUNT = 5
 RECENT_SPIKE_FACTOR = 1.1
 
+def _contains_reference_video(content) -> bool:
+    if content is None:
+        return False
+    if isinstance(content, list):
+        return any(_contains_reference_video(item) for item in content)
+    if isinstance(content, dict):
+        item_type = str(content.get("type", "")).strip().lower()
+        role = str(content.get("role", "")).strip().lower()
+        if item_type in {"video_url", "reference_video"}:
+            return True
+        if role == "reference_video":
+            return True
+        if "video_url" in content:
+            return True
+        return any(_contains_reference_video(v) for v in content.values())
+    return False
+
+
 async def _get_api_estimated_time_async(
-    ark_client, model_name: str, duration: int, resolution: str
+    ark_client, model_name: str, duration: int, resolution: str, content=None
 ) -> (int, str):
     """
     异步获取 API 预估耗时。
     通过分析历史任务数据，使用均值、线性回归或近期负载调整来估算任务完成时间。
     """
     fallback_per_sec = DEFAULT_FALLBACK_PER_SEC
+    model_name_lc = str(model_name).lower()
 
     v2_model_ids = set(VIDEO_2_UI_OPTIONS)
     for m in VIDEO_2_UI_OPTIONS:
         if m in VIDEO_MODEL_MAP:
             v2_model_ids.add(VIDEO_MODEL_MAP[m])
 
-    if model_name in v2_model_ids:
-        fallback_per_sec = 60
+    is_seedance2 = model_name in v2_model_ids or "doubao-seedance-2-0" in model_name_lc
+    request_has_ref_video = _contains_reference_video(content) if is_seedance2 else False
+    seedance2_expected_with_video_per_sec = None
+    seedance2_expected_without_video_per_sec = None
+
+    if is_seedance2:
+        seedance2_with_video_per_sec = {
+            "1080p": 60,
+            "720p": 40,
+            "480p": 20,
+        }
+        fallback_per_sec = seedance2_with_video_per_sec.get(str(resolution).lower(), 40)
+        if "fast" in model_name_lc:
+            fallback_per_sec = fallback_per_sec / 2
+        seedance2_expected_with_video_per_sec = float(fallback_per_sec)
+        seedance2_expected_without_video_per_sec = float(fallback_per_sec / 2)
+        if not request_has_ref_video:
+            fallback_per_sec = fallback_per_sec / 2
     elif resolution == "720p":
         fallback_per_sec = 6
     elif resolution == "480p":
@@ -102,6 +137,15 @@ async def _get_api_estimated_time_async(
 
             if task_time <= 0 or item_duration <= 0:
                 continue
+
+            # API 历史任务不区分是否带参考视频，2.0 系列按耗时区间推断后再筛样本。
+            if is_seedance2:
+                observed_per_sec = float(task_time) / float(item_duration)
+                delta_with_video = abs(observed_per_sec - seedance2_expected_with_video_per_sec)
+                delta_without_video = abs(observed_per_sec - seedance2_expected_without_video_per_sec)
+                inferred_has_ref_video = delta_with_video <= delta_without_video
+                if inferred_has_ref_video != request_has_ref_video:
+                    continue
 
             all_data_points.append((float(item_duration), float(task_time)))
             if item_duration == int(duration):
@@ -407,12 +451,12 @@ class JimengGenerationExecutor:
                     err_text = err_text[11:]
 
                 raw_err_text = str(res)
-                should_print_param_debug = (
-                    ("InvalidParameter" in err_text)
-                    or ("MissingParameter" in err_text)
-                    or ("InvalidParameter" in raw_err_text)
+                is_unlocalized_error = err_text.startswith("Error:")
+                has_param_error_in_raw = (
+                    ("InvalidParameter" in raw_err_text)
                     or ("MissingParameter" in raw_err_text)
                 )
+                should_print_param_debug = is_unlocalized_error and has_param_error_in_raw
 
                 if should_print_param_debug:
                     debug_req = _compact_debug_payload(submitted_task_kwargs[idx])
@@ -465,7 +509,7 @@ class JimengGenerationExecutor:
             est_resolution = "480p"
 
         estimated_single_task_time, method_key = await _get_api_estimated_time_async(
-            ark_client, model_name, estimation_duration, est_resolution
+            ark_client, model_name, estimation_duration, est_resolution, content=content
         )
         if estimated_single_task_time <= 0:
             estimated_single_task_time = 1
