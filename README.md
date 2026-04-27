@@ -6,21 +6,9 @@
 
 本项目为 [ComfyUI](https://github.com/comfyanonymous/ComfyUI) 提供了火山方舟的视觉模型（即梦/豆包） API 节点。用户可以通过这些节点在 ComfyUI 中使用多种图像生成和视频生成功能。
 
-- Seedance 2.0 面向企业用户开放公测，项目已支持 `Seedance 2.0` 与 `Seedance 2.0 fast` 视频生成节点，可用于文生视频、多模态参考、视频编辑与视频延长场景。
-
-## ⚠️ 模型下线与节点弃用说明
-
-火山方舟平台会随着模型迭代逐步下线旧版本模型。目前`doubao-seedream-3-0` 与 `doubao-seedance-1-0-lite` 已进入下线流程，平台将逐步下调配额并在到期后完成服务下线与替换。
-
-- **已标记为即将弃用**:
-  - `图像生成（Seedream 3）`（对应模型：doubao-seedream-3-0）
-  - `视频生成（参考图生视频）`（对应模型：doubao-seedance-1-0-lite）
-- **建议使用新节点**:
-  - `图像生成（Seedream 3）` → `图像生成（Seedream 5）`
-  - `视频生成（参考图生视频）` → `视频生成（Seedance 2.0）`
-
-* 如在使用过程中遇到问题，请通过 [ISSUES](https://github.com/fkxianzhou/ComfyUI-Jimeng-API/issues) 反馈。
-* 暂不支持 ComfyUI 的 Nodes 2.0 新版 UI，如遇到显示异常：
+- 项目已支持 `Seedance 2.0` 与 `Seedance 2.0 fast` 视频生成节点，可用于文生视频、多模态参考、视频编辑与视频延长场景。
+- 如在使用过程中遇到问题，请通过 [ISSUES](https://github.com/fkxianzhou/ComfyUI-Jimeng-API/issues) 反馈。
+- 暂不支持 ComfyUI 的 Nodes 2.0 新版 UI，如遇到显示异常：
   1. 点击左侧/顶部 ComfyUI 图标 打开菜单。
   2. 找到并关闭 Nodes 2.0 选项，切换回传统界面。
 
@@ -77,6 +65,17 @@
 - **视觉理解**:
   - `视觉理解（Visual Understanding）`: 使用 Seed 2.0 模型进行视觉理解对话，支持图片/视频输入和多轮对话。
 
+## ⚠️ 模型下线与节点弃用说明
+
+火山方舟平台会随着模型迭代逐步下线旧版本模型。目前`doubao-seedream-3-0` 与 `doubao-seedance-1-0-lite` 已进入下线流程，平台将逐步下调配额并在到期后完成服务下线与替换。
+
+- **已标记为即将弃用**:
+  - `图像生成（Seedream 3）`（对应模型：doubao-seedream-3-0）
+  - `视频生成（参考图生视频）`（对应模型：doubao-seedance-1-0-lite）
+- **建议使用新节点**:
+  - `图像生成（Seedream 3）` → `图像生成（Seedream 5）`
+  - `视频生成（参考图生视频）` → `视频生成（Seedance 2.0）`
+
 ## 📑 节点详解
 
 ### `火山方舟 API 客户端 (Jimeng API Client)`
@@ -93,13 +92,6 @@
 - **特性**: 当达到限额时自动停止任务并抛出提示，防止额度超支。
 - **示例工作流**:
   ![Quota Settings Workflow](./example_workflows/QuotaSettings.jpg)
-
-***
-
-### `图像生成（Seedream 3）`
-
-- **模式**: 文生图（Doubao-SeedEdit 3.0 图像编辑模型已下线）。
-- **迁移建议**: 如需图生图/参考图输入，请使用 `图像生成（Seedream 4）` 或 `图像生成（Seedream 5）`。
 
 ***
 
@@ -128,23 +120,25 @@
 
 ***
 
-### `视频生成（Seedance 1.0 / 1.5 Pro / 2.0）`
+### `视频生成（Seedance 1.0/1.5 Pro）`
 
-- **1.0 特性**: 支持首/尾帧视频生成。
-- **1.5 Pro 特性**: 支持**音效生成**和**智能时长**控制。
-- **2.0 特性**: 支持最多 **9 张参考图 + 3 段参考视频 + 3 段参考音频**，可覆盖文生视频、多模态参考生视频、视频编辑、视频延长与联网搜索增强。
+支持文生视频与首/尾帧图生视频；在 1.0 能力基础上，1.5 Pro 支持**音效生成**与**智能时长**控制。
 
-### `视频生成（参考图生视频）`
+**示例工作流**:
+![Seedance 1 Workflow](./example_workflows/Seedance%201.jpg)
 
-支持上传 1-4 张图像作为风格或内容参考生成视频。
+### `视频生成（Seedance 2.0）`
+
+支持最多 **9 张参考图 + 3 段参考视频 + 3 段参考音频**，可覆盖文生视频、多模态参考生视频、视频编辑、视频延长与联网搜索增强。
+
+**示例工作流**:
+![Seedance 2 Workflow](./example_workflows/Seedance%202.jpg)
+
+***
 
 ### `视频生成任务列表查询`
 
 支持按状态、模型版本或任务 ID 过滤查询任务历史。
-
-**示例工作流**:
-![Seedance 1 Workflow](./example_workflows/Seedance%201.jpg)
-![Seedance 2 Workflow](./example_workflows/Seedance%202.jpg)
 
 ***
 
