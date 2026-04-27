@@ -285,9 +285,32 @@ def format_api_error(e):
                         break
 
         if matched_msg:
-            return f"[JimengAI] {matched_msg} (Code: {final_code})"
+            if "%s" in matched_msg:
+                def _extract_account_model(text: str):
+                    if not text:
+                        return None, None
+                    m = re.search(
+                        r"account\s*\[([^\]]+)\].*?\[([^\]]+)\]\s*model",
+                        text,
+                        flags=re.IGNORECASE | re.DOTALL,
+                    )
+                    if m:
+                        return m.group(1).strip(), m.group(2).strip()
+                    m = re.search(
+                        r"your\s+account\s+([^\s]+).*?model\s+([^\s\.\]]+)",
+                        text,
+                        flags=re.IGNORECASE | re.DOTALL,
+                    )
+                    if m:
+                        return m.group(1).strip(), m.group(2).strip()
+                    return None, None
 
-    return f"[JimengAI] Error: {err_msg}"
+                account, model = _extract_account_model(err_msg)
+                if account and model:
+                    matched_msg = matched_msg % (account, model)
+            return f"{LOG_PREFIX}{matched_msg} (Code: {final_code})"
+
+    return f"{LOG_PREFIX}Error: {err_msg}"
 
 
 def load_api_keys():

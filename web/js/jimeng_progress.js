@@ -1,6 +1,19 @@
 import { app } from "/scripts/app.js";
 import { api } from "/scripts/api.js";
 
+function isVueNodesEnabled() {
+    const settings = app?.ui?.settings;
+    const getter = settings?.getSettingValue;
+    if (typeof getter !== "function") return false;
+    try {
+        return getter.call(settings, "Comfy.VueNodes.Enabled", false) === true;
+    } catch {
+        return false;
+    }
+}
+
+const VUE_NODES_ENABLED = isVueNodesEnabled();
+
 app.registerExtension({
     name: "ComfyUI.Jimeng.ProgressBar",
 
@@ -47,7 +60,8 @@ app.registerExtension({
     },
 
     nodeCreated(node) {
-        if (node.comfyClass.startsWith("Jimeng")) {
+        if (node.comfyClass && node.comfyClass.startsWith("Jimeng")) {
+            if (VUE_NODES_ENABLED) return;
             const origOnDrawForeground = node.onDrawForeground;
             
             node.onDrawForeground = function(ctx) {

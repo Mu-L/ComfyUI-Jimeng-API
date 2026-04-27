@@ -1,5 +1,36 @@
 import { app } from "/scripts/app.js";
 
+function isVueNodesEnabled() {
+    const settings = app?.ui?.settings;
+    const getter = settings?.getSettingValue;
+    if (typeof getter !== "function") return false;
+    try {
+        return getter.call(settings, "Comfy.VueNodes.Enabled", false) === true;
+    } catch {
+        return false;
+    }
+}
+
+function getComfyLocale() {
+    const settings = app?.ui?.settings;
+    const getter = settings?.getSettingValue;
+    if (typeof getter === "function") {
+        try {
+            const val = getter.call(settings, "Comfy.Locale", "");
+            if (typeof val === "string" && val) return val;
+        } catch {
+        }
+    }
+    return (navigator.language || "en").split("-")[0];
+}
+
+function isZhLocale() {
+    const locale = getComfyLocale();
+    return locale === "zh" || locale.startsWith("zh-");
+}
+
+const VUE_NODES_ENABLED = isVueNodesEnabled();
+
 /**
  * 定义需监听的组件名称列表
  * @type {string[]}
@@ -195,7 +226,7 @@ function applyAutogrowInputLabels(node) {
     const rules = getAutogrowLabelRules(node);
     if (!rules || rules.length === 0) return false;
 
-    const isZh = navigator.language.startsWith("zh");
+    const isZh = isZhLocale();
     let changed = false;
 
     for (const input of node.inputs) {
@@ -383,11 +414,27 @@ app.registerExtension({
     name: "ComfyUI.Jimeng.DynamicWidgets",
 
     async setup() {
-        console.log("%c[Jimeng] Dynamic Widgets Extension Loaded", "color:green; font-weight:bold;");
+        const mode = VUE_NODES_ENABLED ? "Node2.0(Vue)" : "Legacy(Canvas)";
+        console.log(`%c[Jimeng] Dynamic Widgets Extension Loaded (${mode})`, "color:green; font-weight:bold;");
     },
 
     nodeCreated(node) {
-        if (!node.comfyClass.startsWith("Jimeng")) return;
+        if (!node.comfyClass || !node.comfyClass.startsWith("Jimeng")) return;
+
+        if (VUE_NODES_ENABLED) {
+            const onConnectionsChange = node.onConnectionsChange;
+            node.onConnectionsChange = function (type, index, connected, link_info, slot) {
+                const r = onConnectionsChange ? onConnectionsChange.apply(this, arguments) : undefined;
+                refreshAutogrowInputLabels(this);
+                return r;
+            };
+
+            refreshAutogrowInputLabels(node);
+            setTimeout(() => refreshAutogrowInputLabels(node), 0);
+            setTimeout(() => refreshAutogrowInputLabels(node), 120);
+            setTimeout(() => refreshAutogrowInputLabels(node), 360);
+            return;
+        }
 
         // 劫持 configure 方法以检测是否处于加载/配置阶段
         const origConfigure = node.configure;
